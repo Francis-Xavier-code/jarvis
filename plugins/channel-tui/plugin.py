@@ -136,6 +136,8 @@ class _JarvisApp(App):
     BINDINGS = [
         ("ctrl+d", "quit", "Quit"),
         ("ctrl+l", "clear", "Clear output"),
+        ("up", "history_prev", "History prev"),
+        ("down", "history_next", "History next"),
     ]
 
     def __init__(self, kernel) -> None:
@@ -149,6 +151,7 @@ class _JarvisApp(App):
         self._pending_confirm: "tuple[str, threading.Event, list[bool]] | None" = None
         self._md_part = ""   # incomplete md line being streamed
         self._in_code = False
+        self._assistant_prefix = False  # whether "jarvis" marker was emitted
         self._spinner_text = ""
         self._spinner_frame = 0
         self._spinner_timer = None
@@ -207,6 +210,14 @@ class _JarvisApp(App):
 
     # ---- input handling ----
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._pending_confirm is not None:
+            v = event.value.strip().lower()
+            if v in ("y", "yes"):
+                self._answer_confirm(True)
+            elif v in ("n", "no", ""):
+                self._answer_confirm(False)
+            self.query_one("#in", Input).value = ""
+            return
         text = event.value.rstrip("\\").strip()
         self.query_one("#in", Input).value = ""
         if not text:
@@ -222,38 +233,34 @@ class _JarvisApp(App):
             return
         self._start_chat(text)
 
-    def on_input_key(self, event) -> None:
-        """y/N answers the pending confirmation; Up/Down browse history."""
-        if self._pending_confirm is not None:
-            key = getattr(event, "key", "")
-            if key in ("y", "Y"):
-                self._answer_confirm(True)
-                event.stop()
-            elif key in ("n", "N", "escape"):
-                self._answer_confirm(False)
-                event.stop()
-            return
-        if self._busy:
+    def on_key(self, event) -> None:
+        """App-level: y/N answers a pending confirmation, regardless of focus."""
+        if self._pending_confirm is not None and event.key in ("y", "Y", "n", "N", "escape"):
+            self._answer_confirm(event.key.lower() in ("y",))
+            self.query_one("#in", Input).value = ""
+            event.stop()
+
+    def action_history_prev(self) -> None:
+        if self._busy or self._pending_confirm is not None or not self._history:
             return
         inp = self.query_one("#in", Input)
-        if event.key == "up":
-            if self._history:
-                if self._hist_idx is None:
-                    self._hist_idx = len(self._history) - 1
-                    self._partial = inp.value
-                else:
-                    self._hist_idx = max(0, self._hist_idx - 1)
-                inp.value = self._history[self._hist_idx]
-                event.stop()
-        elif event.key == "down":
-            if self._hist_idx is not None:
-                self._hist_idx += 1
-                if self._hist_idx >= len(self._history):
-                    self._hist_idx = None
-                    inp.value = self._partial
-                else:
-                    inp.value = self._history[self._hist_idx]
-                event.stop()
+        if self._hist_idx is None:
+            self._hist_idx = len(self._history) - 1
+            self._partial = inp.value
+        else:
+            self._hist_idx = max(0, self._hist_idx - 1)
+        inp.value = self._history[self._hist_idx]
+
+    def action_history_next(self) -> None:
+        if self._busy or self._pending_confirm is not None or self._hist_idx is None:
+            return
+        inp = self.query_one("#in", Input)
+        self._hist_idx += 1
+        if self._hist_idx >= len(self._history):
+            self._hist_idx = None
+            inp.value = self._partial
+        else:
+            inp.value = self._history[self._hist_idx]
 
     def _handle_command(self, cmd: str) -> None:
         c = cmd.strip()
@@ -271,7 +278,10 @@ class _JarvisApp(App):
         self._set_busy(True)
         self._md_part = ""
         self._in_code = False
-        self._write(f"{_CYAN}you> {text}[/]")
+        self._assistant_prefix = False
+        self._write("")
+        self._write(f"{_CYAN}┌─ you[/]")
+        self._write(f"{_CYAN}│ {text}[/]")
 
         def work() -> None:
             try:
@@ -320,7 +330,7 @@ class _JarvisApp(App):
         lines = text.split("\n")
         self._md_part = lines.pop()
         for ln in lines:
-            self._write(self._md_line(ln))
+            self._write(self._mark_first(self._md_line(ln)))
 
     def _md_line(self, ln: str) -> str:
         stripped = ln.strip()
@@ -333,26 +343,34 @@ class _JarvisApp(App):
 
     def _flush_md(self) -> None:
         if self._md_part:
-            self._write(self._md_line(self._md_part))
+            self._write(self._mark_first(self._md_line(self._md_part)))
             self._md_part = ""
         self._in_code = False
 
+    def _mark_first(self, rendered: str) -> str:
+        """Prefix the first assistant line with a marker, then never again."""
+        if not self._assistant_prefix:
+            self._assistant_prefix = True
+            return f"{_GREEN}jarvis›[/] {rendered}"
+        return rendered
+
     def _on_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
-        self.call_from_thread(self._write, f"{_YELLOW}⚙ {call.name}({args})[/]")
+        self.call_from_thread(self._write, f"{_DIM}  ⚙ {call.name}({args})[/]")
         self.call_from_thread(self._start_spinner, f"working: {call.name}({args})")
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
         summary = (result or "").strip().split("\n", 1)[0][:80]
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
-        mark = "x" if denied else "ok"
+        mark = "✗" if denied else "✓"
         color = _DIM if denied else _GREEN
-        self.call_from_thread(self._write, f"{color} {mark} {call.name} -> {summary} ({duration:.1f}s)[/]")
+        self.call_from_thread(self._write, f"{color}  {mark} {call.name} -> {summary} ({duration:.1f}s)[/]")
         self.call_from_thread(self._stop_spinner)
 
     def _finish_turn(self) -> None:
         self._flush_md()
         self._set_busy(False)
+        self._write("")
         if not self._queue.empty():
             nxt = self._queue.get_nowait()
             self._start_chat(nxt)
