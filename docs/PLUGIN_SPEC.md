@@ -116,7 +116,7 @@ the manifest `kind` for the plugin to be meaningful:
 | kind       | expected service interface |
 |------------|----------------------------|
 | `provider` | `.chat(req) -> iterable[ChatChunk]` (see §5) |
-| `memory`   | `.load(session) -> list[ChatMessage]`, `.append(session, msg)` |
+| `memory`   | `.load(session) -> list[ChatMessage]`, `.append(session, msg)`, `.save(session, messages)` (optional) |
 | `channel`  | `.run(kernel)` (blocking REPL/loop) |
 | `config`   | `.snapshot() -> dict`, `.get(key, default)` |
 | `tool`     | no service required (just registers tools) |
@@ -132,6 +132,12 @@ cfg.watch("ha_token", lambda k, v: ...)   # optional change hook
 Config is owned by the `config` plugin (`config-core`); other plugins read it
 through this API. **v1.0 rule: config is free-form** — `get`/`watch` with no
 enforced schema. Validation, if desired, is the config plugin's own concern.
+
+> **memory `save` (optional):** `.save(session, messages)` overwrites the full
+> session history in one call. The kernel prefers it at the end of every turn so
+> tool-call rounds and `reasoning_content` persist faithfully and replay
+> verbatim next turn. Without `save`, the kernel falls back to appending just
+> the user + final assistant messages.
 
 ---
 
@@ -169,6 +175,11 @@ def chat(self, req: ChatRequest):
 - A chunk may carry `text` and/or `tool_call`. The kernel collects text, and any
   `tool_call` is routed to the registered tool, result fed back, repeated until
   a turn yields no tool calls (max 4 rounds).
+- **tool_call_id binding:** set `ToolCall.id` to the upstream id when parsing
+  the model's `tool_calls`. The kernel stores it on the assistant message, and
+  the provider must replay each `role:"tool"` result bound to the id of the
+  assistant call that produced it (paired in **history order** — never by name,
+  so repeated calls to the same tool cannot cross-wire).
 - **v1.0 rule: provider `chat` is synchronous.** `async def chat` is deferred to
   a later version (planned alongside the first real HTTP/LLM provider). The agent
   loop is sync for v1.0.
@@ -190,6 +201,22 @@ kernel does **not** `pip install` anything. Two safe patterns for v1.0:
 > that needs an extra package must document it and rely on soft-import + a clear
 > runtime message. Auto-install may be reconsidered in a later version behind an
 > explicit opt-in flag.
+
+---
+
+## 6.5 Install-time safety (v1.0 hardening)
+
+Cloning a repo and loading it executes its `plugin.py` **in-process** — full
+code execution with the user's privileges. Two guards apply:
+
+* **Assistant-facing installs are gated.** The `jarvis.install_plugin` tool
+  (via `PluginApi.install_from_url`) accepts only **http(s)** git URLs and
+  requires **explicit user confirmation** (interactive `y/N` prompt by default;
+  replaceable via `kernel.confirm_install`). CLI `jarvis install` is a
+  deliberate user action and bypasses the prompt.
+* **Clone directory names are whitelisted** (`[A-Za-z0-9_-]`, must start with a
+  letter/digit) — path traversal in `name` or in the URL is refused before any
+  git command runs. git subprocesses run with a 60-second timeout.
 
 ---
 
@@ -238,6 +265,8 @@ include a `README.md` that follows this template.
 | Provider `chat` | synchronous generator (`sync` for v1.0) |
 | Plugin dependencies | **no auto-install**; soft-import + graceful message |
 | Config | free-form `get`/`watch`, no enforced schema |
+| Install safety | assistant installs: http(s)-only + user confirmation; dir names whitelisted |
+| Memory persistence | full-history `save` preferred; `append` fallback |
 
 Everything else in this document describes the kernel's enforced behaviour as of
 v1.0. Future changes ship as new spec versions (v1.1, v2.0, ...) and are

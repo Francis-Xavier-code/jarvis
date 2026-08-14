@@ -110,7 +110,7 @@ kernel.service("provider", _EchoProvider())
 | kind | 期望的服务接口 |
 |------|----------------|
 | `provider` | `.chat(req) -> iterable[ChatChunk]`(见 §5) |
-| `memory` | `.load(session) -> list[ChatMessage]`,`.append(session, msg)` |
+| `memory` | `.load(session) -> list[ChatMessage]`,`.append(session, msg)`,`.save(session, messages)`(可选) |
 | `channel` | `.run(kernel)`(阻塞式 REPL/循环) |
 | `config` | `.snapshot() -> dict`,`.get(key, default)` |
 | `tool` | 不需要服务(只注册工具即可) |
@@ -126,6 +126,10 @@ cfg.watch("ha_token", lambda k, v: ...)   # 可选的变化钩子
 配置由 `config` 插件(`config-core`)持有;其他插件通过这个 API 读取。
 **v1.0 规则:配置是自由格式** —— `get`/`watch`,没有强制 schema。如需校验,
 那是 config 插件自己的事。
+
+> **memory `save`(可选):** `.save(session, messages)` 一次性全量覆盖会话历史。
+> 内核在每一轮对话结束时优先调用它,以便工具调用轮与 `reasoning_content` 忠实持久化、
+> 下一轮原样回放。没有 `save` 时,内核回退为只追加 user + 最终 assistant 消息。
 
 ---
 
@@ -159,6 +163,10 @@ def chat(self, req: ChatRequest):
 - `ChatRequest` 携带 `messages`、`tools`(快照)、`model`。
 - 一个 chunk 可携带 `text` 和/或 `tool_call`。内核收集文本,并把任何 `tool_call`
   路由到已注册的工具,结果回灌,如此重复,直到某一轮不再产生 tool_call(最多 4 轮)。
+- **tool_call_id 绑定:** 解析模型的 `tool_calls` 时,把上游 id 填入 `ToolCall.id`。
+  内核会把它存到 assistant 消息上;provider 必须把每条 `role:"tool"` 结果绑定到产生
+  它的那条 assistant 调用的 id(**按历史顺序配对**,绝不按名字),这样同一工具被多次调用
+  也不会串号。
 - **v1.0 规则:provider 的 `chat` 是同步的。** `async def chat` 推迟到后续版本
   (计划与第一个真实的 HTTP/LLM provider 一起引入)。agent 循环在 v1.0 中是同步的。
 
@@ -177,6 +185,20 @@ v1.0 中 `plugin.toml` 里的 `dependencies` **已声明但内核不会执行**�
 > **v1.0 规则:绝不自动安装插件依赖。** 这是刻意的安全 + YAGNI 取舍(避免在克隆时
 > 引入供应链/网络风险)。需要额外包的插件必须写进文档,并依赖软导入 + 清晰的运行时
 > 提示。自动安装可在后续版本中以显式 opt-in 开关重新考虑。
+
+---
+
+## 6.5 安装期安全(v1.0 加固)
+
+克隆一个仓库并加载它,意味着其 `plugin.py` **在进程内**被执行——即以用户权限运行
+任意代码。两道防线:
+
+* **助手发起的安装被设闸。** `jarvis.install_plugin` 工具(经由 `PluginApi.install_from_url`)
+  只接受 **http(s)** git URL,并且需要**用户明确确认**(默认交互式 `y/N` 提示;
+  可通过 `kernel.confirm_install` 替换)。CLI 的 `jarvis install` 是用户有意执行的动作,
+  跳过确认提示。
+* **克隆目录名走白名单**(`[A-Za-z0-9_-]`,且以字母/数字开头)——`name` 或 URL 中的
+  路径穿越会在任何 git 命令执行前被拒绝。git 子进程带 60 秒超时。
 
 ---
 
@@ -222,6 +244,8 @@ v1.0 中 `plugin.toml` 里的 `dependencies` **已声明但内核不会执行**�
 | Provider `chat` | 同步生成器(v1.0 为 sync) |
 | 插件依赖 | **不自动安装**;软导入 + 清晰提示 |
 | 配置 | 自由格式 `get`/`watch`,无强制 schema |
+| 安装安全 | 助手安装:仅 http(s) + 用户确认;目录名白名单 |
+| 记忆持久化 | 优先全量 `save`;`append` 兜底 |
 
 本文档其余部分描述的是内核截至 v1.0 实际强制的行为。未来的变更以新的规范版本
 (v1.1、v2.0 ……)发布,除非显式标注为破坏性变更,否则向后兼容。
