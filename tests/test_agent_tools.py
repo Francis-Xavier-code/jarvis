@@ -158,4 +158,27 @@ def test_agent_identity_tool(tools: Kernel) -> None:
     assert "jarvis@jarvis.local" in out
     assert "-c user.email" in out  # git isolation hint
 
+def test_plugin_log_change_bumps_version_and_changelog(tools: Kernel, tmp_path: Path) -> None:
+    """plugin.log_change adds a CHANGELOG entry and bumps plugin.toml version."""
+    out = _h(tools, "plugin.log_change")("agent-tools", "added a test hook", "Added")
+    assert "v0.2.0" in out  # Added -> minor bump from 0.1.0
+
+    pdir = tmp_path / "plugins" / "agent-tools"
+    toml_text = (pdir / "plugin.toml").read_text(encoding="utf-8")
+    assert 'version = "0.2.0"' in toml_text
+
+    changelog = (pdir / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [0.2.0]" in changelog
+    assert "added a test hook" in changelog
+    # newest entry sits above the previous 0.1.0 section
+    assert changelog.index("## [0.2.0]") < changelog.index("## [0.1.0]")
+
+
+def test_plugin_log_change_patch_bump(tools: Kernel, tmp_path: Path) -> None:
+    out = _h(tools, "plugin.log_change")("agent-tools", "fixed a bug", "Fixed")
+    assert "v0.1.1" in out
+    changelog = (tmp_path / "plugins" / "agent-tools" / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "### Fixed" in changelog
+
+
 

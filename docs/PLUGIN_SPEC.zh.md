@@ -259,3 +259,15 @@ v1.0 中 `plugin.toml` 里的 `dependencies` **已声明但内核不会执行**�
 
 本文档其余部分描述的是内核截至 v1.0 实际强制的行为。未来的变更以新的规范版本
 (v1.1、v2.0 ……)发布,除非显式标注为破坏性变更,否则向后兼容。
+### 7.2 CHANGELOG 与版本管理(必填)
+
+每个插件在根目录必须带一份 **CHANGELOG.md**,并且**每次修改插件都必须同时做两件事**:
+
+1. 在 CHANGELOG.md 中加一条记录 —— `## [<新版本号>] - <日期>`,内含
+   `### Added / Changed / Fixed / Removed` 分类说明改动内容;
+2. bump plugin.toml 里的 `version`(语义化:修复 → patch,新功能 → minor)。
+
+`plugin.log_change(plugin, note, kind)` 工具(agent-tools)可以自动完成这两步,
+并用 JARVIS 身份盖章条目。`jarvis doctor` 会检查每个插件是否都有 CHANGELOG.md,
+以及版本号与最新 changelog 条目是否一致。
+

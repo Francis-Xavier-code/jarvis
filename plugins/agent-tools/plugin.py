@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 
 from jarvis.types import KernelApi
@@ -80,6 +81,21 @@ def _identity(kernel: KernelApi) -> "tuple[str, str, bool]":
 
 def _comment_style(path: Path) -> "str | None":
     return _COMMENT_STYLES.get(path.suffix.lower())
+
+
+def _bump(version: str, kind: str) -> str:
+    """Semver bump: Added -> minor, otherwise patch."""
+    parts = version.split(".")
+    try:
+        major, minor, patch = (int(p) for p in parts[:3])
+    except ValueError:
+        return f"{version}.1"
+    if kind == "Added":
+        minor += 1
+        patch = 0
+    else:
+        patch += 1
+    return f"{major}.{minor}.{patch}"
 
 
 def _sign_file(kernel: KernelApi, p: Path) -> None:
@@ -360,6 +376,52 @@ def setup(kernel: KernelApi) -> None:
             "and NEVER reads the host ~/.gitconfig. For git commits, stay isolated with:\n"
             f"    git -c user.name={name} -c user.email={email} commit ..."
         )
+
+    @kernel.tool(
+        "plugin.log_change",
+        "Record a change to a plugin: add a CHANGELOG entry and bump its version in plugin.toml. Call this after modifying any plugin file (the plugin CHANGELOG/versioning standard requires it).",
+        {"plugin": {"type": "string"}, "note": {"type": "string"}, "kind": {"type": "string"}},
+    )
+    def plugin_log_change(plugin: str, note: str, kind: str = "Changed") -> str:
+        if not note.strip():
+            return "[plugin] note must not be empty"
+        kind = kind.strip().capitalize()
+        if kind not in ("Added", "Changed", "Fixed", "Removed"):
+            kind = "Changed"
+        pdir = _root() / "plugins" / plugin
+        toml_path = pdir / "plugin.toml"
+        if not toml_path.exists():
+            return f"[plugin] no plugin.toml at {pdir}"
+        try:
+            with toml_path.open("rb") as fh:
+                data = tomllib.load(fh)
+            version = str(data["plugin"].get("version", "0.0.0"))
+        except Exception as exc:  # noqa: BLE001
+            return f"[plugin] cannot read plugin.toml: {exc}"
+        new_version = _bump(version, kind)
+        toml_text = toml_path.read_text(encoding="utf-8")
+        toml_text = re.sub(
+            r"(?m)^version\s*=\s*\"[^\"]+\"",
+            f'version = "{new_version}"',
+            toml_text,
+            count=1,
+        )
+        name, email, _ = _identity(kernel)
+        ts = time.strftime("%Y-%m-%d")
+        entry = f"## [{new_version}] - {ts}\n\n### {kind}\n- {note} (by {name} <{email}>)\n\n"
+        changelog_path = pdir / "CHANGELOG.md"
+        if changelog_path.exists():
+            content = changelog_path.read_text(encoding="utf-8")
+            m = re.search(r"(?m)^## \[", content)
+            content = content[: m.start()] + entry + content[m.start():] if m else content.rstrip() + "\n\n" + entry
+        else:
+            content = f"# Changelog — {plugin}\n\n{entry}"
+        try:
+            toml_path.write_text(toml_text, encoding="utf-8")
+            changelog_path.write_text(content, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            return f"[plugin] write failed: {exc}"
+        return f"[plugin] logged change to {plugin} v{new_version} ({kind}) - remember to also bump plugin.toml deps if any"
 
 
 def teardown(kernel: KernelApi) -> None:

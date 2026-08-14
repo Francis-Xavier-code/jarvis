@@ -284,3 +284,18 @@ Everything else in this document describes the kernel's enforced behaviour as of
 v1.0. Future changes ship as new spec versions (v1.1, v2.0, ...) and are
 backward-compatible unless a breaking change is explicitly called out.
 
+### 7.2 CHANGELOG & versioning (REQUIRED)
+
+Every plugin ships a **CHANGELOG.md** at its root, and **every modification to
+the plugin must do BOTH**:
+
+1. add an entry to CHANGELOG.md — `## [<new version>] - <date>` with a
+   `### Added / Changed / Fixed / Removed` section describing the change, and
+2. bump the `version` in plugin.toml (semver: patch for fixes, minor for new
+   features).
+
+The `plugin.log_change(plugin, note, kind)` tool (agent-tools) performs both
+steps automatically and stamps the entry with the JARVIS identity. `jarvis
+doctor` verifies every plugin has a CHANGELOG.md and that its version matches
+the newest changelog entry.
+

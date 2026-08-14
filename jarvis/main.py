@@ -13,6 +13,7 @@ Subcommands:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import click
 
@@ -152,6 +153,32 @@ def doctor() -> None:
     po = kernel._config.get("provider-openai", {})
     key = po.get("openai_api_key") if isinstance(po, dict) else kernel._config.get("openai_api_key", "")
     check("provider API key configured", bool(key), "set [provider-openai] openai_api_key in config.toml" if not key else "present (value hidden)")
+
+    # plugin changelog/versioning compliance
+    import re
+    import tomllib
+
+    missing_cl, version_mismatch = [], []
+    n_plugins = 0
+    for p in sorted(Path("plugins").glob("*/")):
+        toml_path = p / "plugin.toml"
+        if not toml_path.exists():
+            continue
+        n_plugins += 1
+        cl_path = p / "CHANGELOG.md"
+        if not cl_path.exists():
+            missing_cl.append(p.name)
+            continue
+        try:
+            version = tomllib.loads(toml_path.read_text(encoding="utf-8"))["plugin"].get("version")
+        except Exception:  # noqa: BLE001
+            version = None
+        m = re.search(r"\[(\d+\.\d+\.\d+)\]", cl_path.read_text(encoding="utf-8"))
+        cl_version = m.group(1) if m else None
+        if version and cl_version and version != cl_version:
+            version_mismatch.append(f"{p.name} (toml {version} vs changelog {cl_version})")
+    check("plugin CHANGELOGs present", not missing_cl, ", ".join(missing_cl) if missing_cl else f"{n_plugins} plugins")
+    check("plugin versions match changelogs", not version_mismatch, "; ".join(version_mismatch) if version_mismatch else "")
 
     click.echo("")
     if ok:
