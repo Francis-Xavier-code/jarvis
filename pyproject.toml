@@ -11,6 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+ui = ["textual>=0.60"]
 
 [project.scripts]
 jarvis = "jarvis.main:cli"

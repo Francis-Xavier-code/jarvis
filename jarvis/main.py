@@ -6,6 +6,7 @@ Subcommands:
   install     clone one git repo into plugins/ and hot-load it (on demand)
   stats       aggregate token usage / cache hits from the request log
   doctor      health-check deps, config, plugins and the data dir
+  tui         run the full-screen textual TUI channel (requires textual)
   chat        run the terminal channel (REPL); hot-reload watcher runs in background
   watch       load plugins and run ONLY the hot-reload watcher (no channel)
   telegram    run the telegram channel (deferred plugin; no-op until present)
@@ -186,6 +187,25 @@ def doctor() -> None:
     else:
         click.echo("JARVIS has problems — see [!!] items above")
         raise click.exceptions.Exit(1)
+
+
+@cli.command()
+def tui() -> None:
+    """Run the full-screen TUI channel (requires textual)."""
+    kernel = _make_kernel()
+    _load_with_sources(kernel)
+    channel = None
+    for svc in kernel._channels:
+        if getattr(svc, "kind", "") == "tui":
+            channel = svc
+            break
+    if channel is None:
+        click.echo(
+            "[jarvis] channel-tui plugin not loaded — install textual and bootstrap:\n"
+            "    uv pip install -e '.[ui]' && uv run jarvis bootstrap"
+        )
+        raise click.exceptions.Exit(1)
+    channel.run(kernel)
 
 
 @cli.command()
