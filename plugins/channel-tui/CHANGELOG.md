@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.4.3] - 2026-08-15
+
+### Changed
+- replace non-ASCII glyphs (braille spinner, check/cross, gear, arrows) with ASCII-safe symbols so no mojibake on terminals with limited fonts (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.4.2] - 2026-08-15
 
 ### Fixed

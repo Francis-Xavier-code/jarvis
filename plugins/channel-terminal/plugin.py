@@ -137,7 +137,7 @@ class _TerminalChannel:
                     self._segment = kind
                     self._started = True
                 if kind == "reasoning":
-                    print(_c(_DIM, "🧠 " + content), end="", flush=True)
+                    print(_c(_DIM, "[think] " + content), end="", flush=True)
                 else:
                     print(content, end="", flush=True)
         elif chunk.text:
@@ -146,7 +146,7 @@ class _TerminalChannel:
 
     def _stream_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:5])
-        print(_c(_YELLOW, f"\n⚙ {call.name}({args})"), flush=True)
+        print(_c(_YELLOW, f"\n> {call.name}({args})"), flush=True)
 
     def _stream_tool_done(self, call, result: str, duration: float) -> None:
         """Show the tool's outcome so the user knows work actually happened."""
@@ -158,7 +158,7 @@ class _TerminalChannel:
             or result.startswith("[error]")
             or "refused" in result
         )
-        mark = "✗" if denied else "✓"
+        mark = "x" if denied else "+"
         color = _DIM if denied else _GREEN
         print(_c(color, f" {mark} {call.name} -> {summary} ({duration:.1f}s)"), flush=True)
 

@@ -80,19 +80,19 @@ def _md_inline(text: str) -> str:
 def _md_block(line: str, in_code: bool) -> str:
     """Render one markdown line as Rich markup (block-level rules)."""
     if in_code:
-        return f"{_SURFACE} │ {line}[/]"
+        return f"{_SURFACE} | {line}[/]"
     stripped = line.strip()
     m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
     if m:
         return f"[bold #7c5cff]{'#' * len(m.group(1))} {_md_inline(m.group(2))}[/]"
     if re.match(r"^(\*{3,}|_{3,}|-{3,})\s*$", stripped):
-        return "[dim]" + "─" * 40 + "[/]"
+        return "[dim]" + "-" * 40 + "[/]"
     if stripped.startswith(">"):
-        return f"[dim]│ {_md_inline(stripped.lstrip('> ').strip())}[/]"
+        return f"[dim]| {_md_inline(stripped.lstrip('> ').strip())}[/]"
     m = re.match(r"^(\s*)([-*+])\s+(.*)$", line)
     if m:
         indent = "  " * (len(m.group(1)) // 2)
-        bullet = "[bold #3fb950]•[/]" if not m.group(1) else "[bold #3fb950]–[/]"
+        bullet = "[bold #3fb950]-[/]" if not m.group(1) else "[bold #3fb950]-[/]"
         return f"{indent}{bullet} {_md_inline(m.group(3))}"
     m = re.match(r"^(\s*)(\d+)[.)]\s+(.*)$", line)
     if m:
@@ -101,7 +101,7 @@ def _md_block(line: str, in_code: bool) -> str:
     return _md_inline(line)
 
 # tool-call spinner frames (braille dots)
-_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_SPINNER = "|/-\\"
 
 
 def setup(kernel: KernelApi) -> None:
@@ -199,7 +199,7 @@ class _JarvisApp(App):
         except Exception:  # noqa: BLE001 - already registered / older textual
             pass
         self._kernel.confirm_action = self._confirm_wait
-        self._write(f"{_PRIMARY}JARVIS ›[/] ready. Type /help for commands.")
+        self._write(f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands.")
         self._focus_input()
 
     def _write(self, text: str) -> None:
@@ -229,7 +229,7 @@ class _JarvisApp(App):
         self._pending_confirm = (prompt, done, result)
         self._write(f"{_ORANGE}? {prompt} [y/N] (press y or n)[/]")
         self.query_one("#in", Input).placeholder = "answer y or n"
-        self.query_one("#status", Static).update(f"{_ORANGE}⏳ awaiting your y/N[/]")
+        self.query_one("#status", Static).update(f"{_ORANGE}awaiting your y/N...[/]")
         self._focus_input()
 
     def _answer_confirm(self, ans: bool) -> None:
@@ -240,7 +240,7 @@ class _JarvisApp(App):
         self.query_one("#in", Input).placeholder = "message JARVIS... (\\ continues a line, /help for commands)"
         result.append(ans)
         done.set()
-        self._write(f"{_DIM}↳ {'yes' if ans else 'no'}[/]")
+        self._write(f"{_DIM}-> {'yes' if ans else 'no'}[/]")
 
     # ---- input handling ----
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -316,11 +316,11 @@ class _JarvisApp(App):
         self._turn_start = time.time()
         self._write("")
         lines = text.split("\n")
-        self._write(f"{_SECONDARY}you ›[/] {lines[0]}")
+        self._write(f"{_SECONDARY}you >[/] {lines[0]}")
         for extra in lines[1:]:
             self._write(f"  {extra}")
         # visible "thinking" animation while waiting for the first token
-        self._start_spinner("thinking…")
+        self._start_spinner("thinking...")
 
         def work() -> None:
             try:
@@ -392,18 +392,18 @@ class _JarvisApp(App):
         """Prefix the first assistant line with a marker, then never again."""
         if not self._assistant_prefix:
             self._assistant_prefix = True
-            return f"{_PRIMARY}jarvis ›[/] {rendered}"
+            return f"{_PRIMARY}jarvis >[/] {rendered}"
         return rendered
 
     def _on_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
-        self.call_from_thread(self._write, f"{_DIM}  ⚙ {call.name}({args})[/]")
+        self.call_from_thread(self._write, f"{_DIM}  > {call.name}({args})[/]")
         self.call_from_thread(self._start_spinner, f"working: {call.name}({args})")
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
         summary = (result or "").strip().split("\n", 1)[0][:80]
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
-        mark = "✗" if denied else "✓"
+        mark = "x" if denied else "+"
         color = _DIM if denied else _GREEN
         self.call_from_thread(self._write, f"{color}  {mark} {call.name} -> {summary} ({duration:.1f}s)[/]")
         self.call_from_thread(self._stop_spinner)
@@ -414,7 +414,7 @@ class _JarvisApp(App):
         self._set_busy(False)
         elapsed = time.time() - self._turn_start if self._turn_start else 0.0
         self._write("")
-        self.query_one("#status", Static).update(f"{_GREEN}✓ done ({elapsed:.1f}s)[/]")
+        self.query_one("#status", Static).update(f"{_GREEN}+ done ({elapsed:.1f}s)[/]")
         self.set_timer(1.2, self._clear_status)
         if not self._queue.empty():
             nxt = self._queue.get_nowait()
