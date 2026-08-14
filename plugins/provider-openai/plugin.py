@@ -207,6 +207,10 @@ class OpenAIProvider:
             if resp.status_code != 200:
                 yield ChatChunk(text=f"[provider-openai] HTTP {resp.status_code}: {resp.text[:400]}")
                 return
+            # Upstream may omit charset -> requests assumes latin-1 and garbles
+            # UTF-8 text ("Ã¥ÂÂ¨" becomes "ÃÂ¥ÃÂ¨"). OpenAI-compatible endpoints are
+            # UTF-8; pin the encoding for both the SSE and JSON paths.
+            resp.encoding = "utf-8"
             if stream:
                 yield from self._consume_stream(resp)
             else:
@@ -303,3 +307,5 @@ def setup(kernel: KernelApi) -> None:
 
 def teardown(kernel: KernelApi) -> None:
     pass
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 02:37:35 ---

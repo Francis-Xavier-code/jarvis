@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.2.1] - 2026-08-15
+
+### Changed
+- fix: pin resp.encoding=utf-8 — upstream may omit charset, requests then assumes latin-1 and garbles UTF-8 Chinese text in SSE/json (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.2.0] - 2026-08-15
 
 ### Added
