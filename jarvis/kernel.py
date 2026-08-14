@@ -172,7 +172,23 @@ class Kernel:
                     pending_calls.append(chunk.tool_call)
             if not pending_calls:
                 break
-            history.append(ChatMessage(role="assistant", content=reply_text))
+            # Store the assistant turn WITH its tool_calls so the history can be
+            # replayed verbatim for providers that require tool_call_id binding.
+            assistant_tool_calls = [
+                {
+                    "id": f"call_{i}_{abs(hash(c.name)) % 100000}",
+                    "type": "function",
+                    "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)},
+                }
+                for i, c in enumerate(pending_calls)
+            ]
+            history.append(
+                ChatMessage(
+                    role="assistant",
+                    content=reply_text,
+                    tool_calls=assistant_tool_calls,
+                )
+            )
             for call in pending_calls:
                 result = self._invoke_tool(call)
                 history.append(

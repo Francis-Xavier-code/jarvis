@@ -1,0 +1,10 @@
+[plugin]
+name = "provider-openai"
+kind = "provider"
+version = "0.1.0"
+entry = "plugin.py"
+hot_reload = true
+
+[provides]
+# This provider exposes no tools of its own — it is the LLM brain.
+tools = []

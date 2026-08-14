@@ -31,6 +31,10 @@ class ChatMessage:
     role: str  # "system" | "user" | "assistant" | "tool"
     content: str
     name: str | None = None  # tool name, when role == "tool"
+    # OpenAI-style tool_calls attached to an assistant message, so the history
+    # can be replayed faithfully (the kernel stores them; providers forward
+    # them verbatim). Each item: {"id", "type", "function": {"name","arguments"}}.
+    tool_calls: list[dict] | None = None
 
 
 @dataclass
