@@ -11,6 +11,9 @@ uv.lock
 data/
 sessions/
 
+# Agent
+.hermes
+
 # OS
 .DS_Store
 
