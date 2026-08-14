@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.0] - 2026-08-15
+
+### Added
+- 1:1 dsh-TUI visual port: pixel-whale splash + header (13 frames, RGB half-blocks), big-font JARVIS title with blue-white shimmer, design system (divider/progress/status-icon/byline) (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.5.0] - 2026-08-15
 
 ### Added

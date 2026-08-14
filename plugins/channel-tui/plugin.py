@@ -21,10 +21,14 @@ import time
 
 from jarvis.types import KernelApi
 
+from . import ui
+from .ui import GLYPHS, FRAMES, render_big, render_whale, shimmer_line
+
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
     from textual.containers import VerticalScroll
+    from textual.screen import Screen
     from textual.theme import Theme
     from textual.widgets import Footer, Header, Input, Static
     _TEXTUAL_OK = True
@@ -146,6 +150,39 @@ _THEME = Theme(
 )
 
 
+class _SplashScreen(Screen):
+    """Startup splash: big-font title with blue-white shimmer + pixel whale animation."""
+
+    CSS = """
+    #splash-root { align: center middle; }
+    #splash-big { width: auto; }
+    #splash-whale { width: auto; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="splash-root"):
+            yield Static("", id="splash-big")
+            yield Static("", id="splash-whale")
+
+    def on_mount(self) -> None:
+        self._frames = ui.whale_frames_sequence()
+        self._fi = 0
+        self._timer = self.set_interval(0.1, self._next_frame)
+        self._big_rows = render_big("JARVIS")
+        self._step = 0
+        self._stimer = self.set_interval(0.05, self._shimmer)
+        self.set_timer(2.8, self.dismiss)
+
+    def _next_frame(self) -> None:
+        self.query_one("#splash-whale", Static).update(self._frames[self._fi % len(self._frames)])
+        self._fi += 1
+
+    def _shimmer(self) -> None:
+        rows = "\n".join(shimmer_line(row, self._step) for row in self._big_rows)
+        self.query_one("#splash-big", Static).update(rows)
+        self._step += 1
+
+
 class _JarvisApp(App):
     """Textual app: output panel + input box + header/footer."""
 
@@ -191,6 +228,14 @@ class _JarvisApp(App):
     #in:focus {
         border: hkey $accent;
     }
+    #whale {
+        height: 13;
+        margin: 0 1;
+        content-align: center top;
+    }
+    #whale.hidden {
+        display: none;
+    }
     Header { background: $surface; color: $text; }
     Footer { background: $surface; }
     """
@@ -232,6 +277,7 @@ class _JarvisApp(App):
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
+        yield Static("", id="whale")
         yield Header(show_clock=True)
         yield VerticalScroll(id="chat")
         yield Static("", id="status")
@@ -245,8 +291,10 @@ class _JarvisApp(App):
         except Exception:  # noqa: BLE001 - already registered / older textual
             pass
         self._kernel.confirm_action = self._confirm_wait
+        self.query_one("#whale", Static).update("\n".join(render_whale("standard")))
         self._log(f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands.")
         self._focus_input()
+        self.push_screen(_SplashScreen())
 
     def _log(self, text: str, classes: str = "") -> None:
         """Append a plain message row (system / tool / error lines)."""
@@ -335,6 +383,11 @@ class _JarvisApp(App):
             self._answer_confirm(event.key.lower() in ("y",))
             self.query_one("#in", Input).value = ""
             event.stop()
+
+    def on_resize(self) -> None:
+        """Hide the pixel whale on narrow terminals (dsh-TUI WHALE_MIN_COLUMNS=64)."""
+        w = self.query_one("#whale", Static)
+        w.set_class(self.size.width < 64, "hidden")
 
     def action_history_prev(self) -> None:
         if self._busy or self._pending_confirm is not None or not self._history:
