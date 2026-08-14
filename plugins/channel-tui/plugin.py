@@ -15,6 +15,7 @@ Run with: `jarvis tui`
 from __future__ import annotations
 
 import queue
+import re
 import threading
 
 from jarvis.types import KernelApi
@@ -31,6 +32,68 @@ _GREEN = "[#33ff57]"
 _YELLOW = "[#ffd700]"
 _DIM = "[dim]"
 _CYAN = "[#00d7ff]"
+
+# ---- streaming Markdown -> Rich markup ----
+# RichLog(markup=True) understands [tags], not Markdown syntax, so we convert
+# the assistant's streamed text line by line before writing it to the panel.
+
+_INLINE_MD = [
+    (re.compile(r"`([^`]+)`"), r"[bold #00d7ff]\1[/]"),
+    (re.compile(r"\*\*([^*]+)\*\*"), r"[bold]\1[/]"),
+    (re.compile(r"__([^_]+)__"), r"[bold]\1[/]"),
+    (re.compile(r"\*([^*]+)\*"), r"[italic]\1[/]"),
+    (re.compile(r"_([^_]+)_"), r"[italic]\1[/]"),
+    (re.compile(r"~~([^~]+)~~"), r"[dim]\1[/]"),
+]
+
+
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+
+
+def _md_inline(text: str) -> str:
+    """Convert inline markdown markers to Rich markup tags.
+
+    Literal square brackets in the source are escaped to `\[` first (Rich
+    parses `[...]` as tags), so text like `arr[0]` or `[1, 2]` survives.
+    Links are stashed before escaping and re-expanded as underlined labels.
+    """
+    links: list[tuple[str, str]] = []
+
+    def _stash(m) -> str:
+        links.append((m.group(1), m.group(2)))
+        return f"\x00LINK{len(links) - 1}\x00"
+
+    text = _LINK_RE.sub(_stash, text)
+    text = text.replace("[", "\\[")
+    for pat, repl in _INLINE_MD:
+        text = pat.sub(repl, text)
+    for i, (label, _url) in enumerate(links):
+        text = text.replace(f"\x00LINK{i}\x00", f"[underline]{_md_inline(label)}[/]")
+    return text
+
+
+def _md_block(line: str, in_code: bool) -> str:
+    """Render one markdown line as Rich markup (block-level rules)."""
+    if in_code:
+        return f"[bold #00d7ff]│ {line}[/]"
+    stripped = line.strip()
+    m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+    if m:
+        return f"[bold #ffd700]{'#' * len(m.group(1))} {_md_inline(m.group(2))}[/]"
+    if re.match(r"^(\*{3,}|_{3,}|-{3,})\s*$", stripped):
+        return "[dim]" + "─" * 40 + "[/]"
+    if stripped.startswith(">"):
+        return f"[dim]│ {_md_inline(stripped.lstrip('> ').strip())}[/]"
+    m = re.match(r"^(\s*)([-*+])\s+(.*)$", line)
+    if m:
+        indent = "  " * (len(m.group(1)) // 2)
+        bullet = "[bold #33ff57]•[/]" if not m.group(1) else "[bold #33ff57]–[/]"
+        return f"{indent}{bullet} {_md_inline(m.group(3))}"
+    m = re.match(r"^(\s*)(\d+)[.)]\s+(.*)$", line)
+    if m:
+        indent = "  " * (len(m.group(1)) // 2)
+        return f"{indent}[bold #33ff57]{m.group(2)}.[/] {_md_inline(m.group(3))}"
+    return _md_inline(line)
 
 # tool-call spinner frames (braille dots)
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -84,6 +147,8 @@ class _JarvisApp(App):
         self._hist_idx: "int | None" = None
         self._partial = ""
         self._pending_confirm: "tuple[str, threading.Event, list[bool]] | None" = None
+        self._md_part = ""   # incomplete md line being streamed
+        self._in_code = False
         self._spinner_text = ""
         self._spinner_frame = 0
         self._spinner_timer = None
@@ -204,6 +269,8 @@ class _JarvisApp(App):
     # ---- chat worker ----
     def _start_chat(self, text: str) -> None:
         self._set_busy(True)
+        self._md_part = ""
+        self._in_code = False
         self._write(f"{_CYAN}you> {text}[/]")
 
         def work() -> None:
@@ -244,7 +311,31 @@ class _JarvisApp(App):
 
     def _on_chunk(self, chunk) -> None:
         if chunk.text:
-            self.call_from_thread(self._write, chunk.text)
+            self.call_from_thread(self._stream_md, chunk.text)
+
+    # ---- streaming markdown -> rich markup ----
+    def _stream_md(self, text: str) -> None:
+        """Feed a streamed assistant chunk; render complete lines as md."""
+        text = self._md_part + text
+        lines = text.split("\n")
+        self._md_part = lines.pop()
+        for ln in lines:
+            self._write(self._md_line(ln))
+
+    def _md_line(self, ln: str) -> str:
+        stripped = ln.strip()
+        if stripped.startswith("```"):
+            self._in_code = not self._in_code
+            if self._in_code:
+                return "[dim]┌─ code " + "─" * 16 + "[/]"
+            return "[dim]└" + "─" * 24 + "[/]"
+        return _md_block(ln, self._in_code)
+
+    def _flush_md(self) -> None:
+        if self._md_part:
+            self._write(self._md_line(self._md_part))
+            self._md_part = ""
+        self._in_code = False
 
     def _on_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
@@ -260,6 +351,7 @@ class _JarvisApp(App):
         self.call_from_thread(self._stop_spinner)
 
     def _finish_turn(self) -> None:
+        self._flush_md()
         self._set_busy(False)
         if not self._queue.empty():
             nxt = self._queue.get_nowait()
@@ -292,3 +384,5 @@ class _TuiChannel:
             print("[channel-tui] textual not installed - run: uv pip install -e .[ui]")
             return
         _JarvisApp(kernel).run()
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 02:11:23 ---

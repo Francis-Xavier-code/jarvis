@@ -58,3 +58,19 @@ def test_spinner_helpers_present(kernel: Kernel) -> None:
     for attr in ("_start_spinner", "_tick_spinner", "_stop_spinner"):
         assert hasattr(app, attr)
 
+def test_md_inline_renders_and_escapes_brackets(kernel: Kernel) -> None:
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    # bold + code
+    out = mod._md_inline("use **bold** and `code` here")
+    assert "[bold]" in out and "code" in out
+    # literal brackets survive (escaped for Rich, not eaten as tags)
+    out2 = mod._md_inline("index arr[0] and [1, 2]")
+    assert "arr[0]" in out2.replace("\\[", "[")
+    # links become underlined labels
+    out3 = mod._md_inline("[docs](https://x.dev)")
+    assert "[underline]docs[/]" in out3
+    assert "https://" not in out3
+
+
