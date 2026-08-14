@@ -24,9 +24,9 @@ from jarvis.types import KernelApi
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
+    from textual.containers import VerticalScroll
     from textual.theme import Theme
-    from textual.theme import Theme
-    from textual.widgets import Footer, Header, Input, RichLog, Static
+    from textual.widgets import Footer, Header, Input, Static
     _TEXTUAL_OK = True
 except ImportError:  # pragma: no cover
     _TEXTUAL_OK = False
@@ -100,8 +100,26 @@ def _md_block(line: str, in_code: bool) -> str:
         return f"{indent}[bold #3fb950]{m.group(2)}.[/] {_md_inline(m.group(3))}"
     return _md_inline(line)
 
-# tool-call spinner frames (braille dots)
+# tool-call spinner frames (ASCII-safe)
 _SPINNER = "|/-\\"
+
+# display names for common tools (Claude Code style)
+_KNOWN_TOOLS = {
+    "bash.execute": "Bash",
+    "fs.read": "Read", "fs.write": "Write", "fs.edit": "Edit", "fs.append": "Append",
+    "fs.list": "List", "fs.glob": "Glob", "fs.undo": "Undo",
+    "web.search": "WebSearch", "web.fetch": "WebFetch",
+    "mem.store": "MemStore", "mem.recall": "MemRecall", "mem.forget": "MemForget",
+    "jarvis.install_plugin": "Install", "jarvis.uninstall_plugin": "Uninstall",
+    "plugin.log_change": "LogChange", "agent.identity": "Identity",
+    "self.whoami": "Whoami", "self.capabilities": "Capabilities",
+    "self.version": "Version", "self.config": "Config",
+    "hass.light_on": "LightOn", "hass.light_off": "LightOff", "hass.status": "HAStatus",
+}
+
+
+def _display_name(name: str) -> str:
+    return _KNOWN_TOOLS.get(name, name.split(".")[-1].title() or name)
 
 
 def setup(kernel: KernelApi) -> None:
@@ -133,11 +151,28 @@ class _JarvisApp(App):
 
     CSS = """
     Screen { background: $background; }
-    #out {
+    #chat {
         height: 1fr;
         margin: 0 1;
+        scrollbar-color: $primary;
+    }
+    .msg {
+        width: 100%;
         padding: 0 1;
-        background: $panel;
+    }
+    .user-msg {
+        background: $surface;
+        margin-top: 1;
+    }
+    .assistant-msg {
+        margin-top: 1;
+    }
+    .thinking-msg {
+        color: $text 70%;
+        margin-top: 1;
+    }
+    .tool-msg {
+        color: $text 70%;
     }
     #status {
         height: 1;
@@ -163,6 +198,7 @@ class _JarvisApp(App):
     BINDINGS = [
         ("ctrl+d", "quit", "Quit"),
         ("ctrl+l", "clear", "Clear output"),
+        ("ctrl+o", "toggle_thinking", "Toggle thinking"),
         ("up", "history_prev", "History prev"),
         ("down", "history_next", "History next"),
     ]
@@ -183,11 +219,21 @@ class _JarvisApp(App):
         self._spinner_frame = 0
         self._spinner_timer = None
         self._turn_start = 0.0
+        # structured message list state
+        self._assistant_buf: list[str] = []
+        self._current_assistant = None
+        self._current_thinking = None
+        self._thinking = ""
+        self._thinking_visible = False
+        self._current_tool = None
+        self._current_tool_label = ""
+        self._tool_spinner_idx = 0
+        self._tool_spinner_timer = None
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        yield RichLog(id="out", wrap=True, markup=True, highlight=True)
+        yield VerticalScroll(id="chat")
         yield Static("", id="status")
         yield Input(id="in", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
         yield Footer()
@@ -199,11 +245,27 @@ class _JarvisApp(App):
         except Exception:  # noqa: BLE001 - already registered / older textual
             pass
         self._kernel.confirm_action = self._confirm_wait
-        self._write(f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands.")
+        self._log(f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands.")
         self._focus_input()
 
-    def _write(self, text: str) -> None:
-        self.query_one("#out", RichLog).write(text)
+    def _log(self, text: str, classes: str = "") -> None:
+        """Append a plain message row (system / tool / error lines)."""
+        self._new_message(text, classes)
+
+    def _new_message(self, markup: str, classes: str = "") -> Static:
+        """Mount a message widget into the chat scroll area."""
+        sv = self.query_one("#chat", VerticalScroll)
+        w = Static(markup, classes=("msg " + classes).strip())
+        sv.mount(w)
+        sv.scroll_end(animate=False)
+        return w
+
+    def _update_message(self, widget, markup: str) -> None:
+        if widget is not None:
+            widget.update(markup)
+
+    def _scroll_end(self) -> None:
+        self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
 
     def _focus_input(self) -> None:
         self.query_one("#in", Input).focus()
@@ -227,7 +289,7 @@ class _JarvisApp(App):
 
     def _show_confirm(self, prompt: str, done: threading.Event, result: list[bool]) -> None:
         self._pending_confirm = (prompt, done, result)
-        self._write(f"{_ORANGE}? {prompt} [y/N] (press y or n)[/]")
+        self._log(f"{_ORANGE}? {prompt} [y/N] (press y or n)[/]")
         self.query_one("#in", Input).placeholder = "answer y or n"
         self.query_one("#status", Static).update(f"{_ORANGE}awaiting your y/N...[/]")
         self._focus_input()
@@ -240,7 +302,7 @@ class _JarvisApp(App):
         self.query_one("#in", Input).placeholder = "message JARVIS... (\\ continues a line, /help for commands)"
         result.append(ans)
         done.set()
-        self._write(f"{_DIM}-> {'yes' if ans else 'no'}[/]")
+        self._log(f"{_DIM}-> {'yes' if ans else 'no'}[/]")
 
     # ---- input handling ----
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -263,7 +325,7 @@ class _JarvisApp(App):
             return
         if self._busy:
             self._queue.put(text)
-            self._write(f"{_DIM}queued (JARVIS busy): {text}[/]")
+            self._log(f"{_DIM}queued (JARVIS busy): {text}[/]")
             return
         self._start_chat(text)
 
@@ -299,13 +361,13 @@ class _JarvisApp(App):
     def _handle_command(self, cmd: str) -> None:
         c = cmd.strip()
         if c == "/help":
-            self._write(_HELP)
+            self._log(_HELP)
         elif c in ("/exit", "/quit"):
             self.exit()
         elif c == "/clear":
-            self.query_one("#out", RichLog).clear()
+            self.query_one("#chat", VerticalScroll).remove_children()
         else:
-            self._write(f"{_DIM}unknown command: {c} (try /help)[/]")
+            self._log(f"{_DIM}unknown command: {c} (try /help)[/]")
 
     # ---- chat worker ----
     def _start_chat(self, text: str) -> None:
@@ -314,11 +376,17 @@ class _JarvisApp(App):
         self._in_code = False
         self._assistant_prefix = False
         self._turn_start = time.time()
-        self._write("")
+        self._thinking = ""
+        self._thinking_visible = False
+        self._current_thinking = None
+        self._current_assistant = None
+        self._assistant_buf = []
+        self._current_tool = None
+        # user bubble (structured message)
         lines = text.split("\n")
-        self._write(f"{_SECONDARY}you >[/] {lines[0]}")
+        self._new_message(f"{_SECONDARY}you >[/] {lines[0]}", "user-msg")
         for extra in lines[1:]:
-            self._write(f"  {extra}")
+            self._new_message(f"  {extra}", "user-msg")
         # visible "thinking" animation while waiting for the first token
         self._start_spinner("thinking...")
 
@@ -332,7 +400,7 @@ class _JarvisApp(App):
                     on_tool_done=self._on_tool_done,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.call_from_thread(self._write, f"{_ORANGE}[error] {exc}[/]")
+                self.call_from_thread(self._log, f"{_ORANGE}[error] {exc}[/]")
             finally:
                 self.call_from_thread(self._finish_turn)
 
@@ -359,10 +427,33 @@ class _JarvisApp(App):
         self.query_one("#status", Static).update("")
 
     def _on_chunk(self, chunk) -> None:
+        if chunk.reasoning:
+            self.call_from_thread(self._feed_thinking, chunk.reasoning)
         if chunk.text:
             # text arriving: drop the thinking/tool spinner (re-armed by _on_tool)
             self.call_from_thread(self._stop_spinner)
             self.call_from_thread(self._stream_md, chunk.text)
+
+    def _feed_thinking(self, text: str) -> None:
+        self._thinking += text
+        if self._current_thinking is None:
+            self._current_thinking = self._new_message("Thinking... (ctrl+o to expand)", "thinking-msg")
+        self._update_thinking()
+
+    def _update_thinking(self) -> None:
+        if self._current_thinking is None:
+            return
+        if self._thinking_visible:
+            self._update_message(self._current_thinking, f"Thinking (expanded):\n{self._thinking}")
+        else:
+            self._update_message(self._current_thinking, f"Thinking... ({len(self._thinking)} ch, ctrl+o)")
+        self._scroll_end()
+
+    def action_toggle_thinking(self) -> None:
+        if self._current_thinking is None:
+            return
+        self._thinking_visible = not self._thinking_visible
+        self._update_thinking()
 
     # ---- streaming markdown -> rich markup ----
     def _stream_md(self, text: str) -> None:
@@ -371,7 +462,16 @@ class _JarvisApp(App):
         lines = text.split("\n")
         self._md_part = lines.pop()
         for ln in lines:
-            self._write(self._mark_first(self._md_line(ln)))
+            self._assistant_buf.append(self._mark_first(self._md_line(ln)))
+        self._refresh_assistant()
+
+    def _refresh_assistant(self) -> None:
+        if not self._assistant_buf:
+            return
+        if self._current_assistant is None:
+            self._current_assistant = self._new_message("", "assistant-msg")
+        self._update_message(self._current_assistant, "\n".join(self._assistant_buf))
+        self._scroll_end()
 
     def _md_line(self, ln: str) -> str:
         stripped = ln.strip()
@@ -384,9 +484,10 @@ class _JarvisApp(App):
 
     def _flush_md(self) -> None:
         if self._md_part:
-            self._write(self._mark_first(self._md_line(self._md_part)))
+            self._assistant_buf.append(self._mark_first(self._md_line(self._md_part)))
             self._md_part = ""
         self._in_code = False
+        self._refresh_assistant()
 
     def _mark_first(self, rendered: str) -> str:
         """Prefix the first assistant line with a marker, then never again."""
@@ -397,15 +498,34 @@ class _JarvisApp(App):
 
     def _on_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
-        self.call_from_thread(self._write, f"{_DIM}  > {call.name}({args})[/]")
-        self.call_from_thread(self._start_spinner, f"working: {call.name}({args})")
+        label = f"{_display_name(call.name)}({args})"
+        self._current_tool_label = label
+        self._current_tool = self._new_message(f"  {_SPINNER[0]} {label}", "tool-msg")
+        self._tool_spinner_idx = 1
+        if self._tool_spinner_timer is None:
+            self._tool_spinner_timer = self.set_interval(0.1, self._tick_tool_spinner)
+        self.call_from_thread(self._start_spinner, f"working: {label}")
+
+    def _tick_tool_spinner(self) -> None:
+        if self._current_tool is not None:
+            frame = _SPINNER[self._tool_spinner_idx % len(_SPINNER)]
+            self._tool_spinner_idx += 1
+            self._update_message(self._current_tool, f"  {frame} {self._current_tool_label}")
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
+        if self._tool_spinner_timer is not None:
+            self._tool_spinner_timer.stop()
+            self._tool_spinner_timer = None
         summary = (result or "").strip().split("\n", 1)[0][:80]
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
         mark = "x" if denied else "+"
         color = _DIM if denied else _GREEN
-        self.call_from_thread(self._write, f"{color}  {mark} {call.name} -> {summary} ({duration:.1f}s)[/]")
+        if self._current_tool is not None:
+            self._update_message(
+                self._current_tool,
+                f"{color}  {mark} {self._current_tool_label} -> {summary} ({duration:.1f}s)[/]",
+            )
+        self._current_tool = None
         self.call_from_thread(self._stop_spinner)
 
     def _finish_turn(self) -> None:
@@ -413,7 +533,6 @@ class _JarvisApp(App):
         self._stop_spinner()
         self._set_busy(False)
         elapsed = time.time() - self._turn_start if self._turn_start else 0.0
-        self._write("")
         self.query_one("#status", Static).update(f"{_GREEN}+ done ({elapsed:.1f}s)[/]")
         self.set_timer(1.2, self._clear_status)
         if not self._queue.empty():
@@ -428,7 +547,13 @@ class _JarvisApp(App):
             self.query_one("#status", Static).update("")
 
     def action_clear(self) -> None:
-        self.query_one("#out", RichLog).clear()
+        self.query_one("#chat", VerticalScroll).remove_children()
+        self._current_assistant = None
+        self._current_thinking = None
+        self._current_tool = None
+        self._assistant_buf = []
+        self._thinking = ""
+        self._thinking_visible = False
 
 
 _HELP = """
@@ -439,8 +564,9 @@ _HELP = """
   - end a line with backslash to continue on the next line
   - up/down arrows browse history
   - typing while JARVIS is busy queues your message
-  - tool confirmations appear as a dialog: press the Yes/No button
-  - ctrl+d quits, ctrl+l clears the output panel
+  - tool confirmations are answered with y/N on the keyboard
+  - ctrl+o expands/collapses the thinking block
+  - ctrl+d quits, ctrl+l clears the chat
 """
 
 
