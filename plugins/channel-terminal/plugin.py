@@ -17,11 +17,6 @@ def teardown(kernel: KernelApi) -> None:
     pass
 
 
-def register_services(kernel: KernelApi) -> None:
-    # used by kernel._rebuild_services after a plugin teardown
-    kernel.service("channel", _TerminalChannel())
-
-
 class _TerminalChannel:
     kind = "terminal"
 

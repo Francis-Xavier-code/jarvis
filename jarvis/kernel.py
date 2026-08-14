@@ -36,6 +36,19 @@ class Kernel:
         self._memory_svc: Any = None
         self._provider_svc: Any = None
         self._channels: list[Any] = []
+        # Gate for assistant-initiated plugin installs: returning False refuses
+        # the install. Defaults to an interactive terminal prompt; tests and
+        # headless deployments can replace it (or set it to None to allow).
+        self.confirm_install: Callable[[str], bool] | None = self._default_confirm_install
+
+    @staticmethod
+    def _default_confirm_install(git_url: str) -> bool:
+        """Interactive y/N confirmation for assistant-initiated plugin installs."""
+        try:
+            answer = input(f"[jarvis] install plugin from {git_url}? [y/N] ").strip().lower()
+            return answer in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            return False
 
     # ---- plugin registration hooks (called by KernelApi) ----
     def _set_active(self, name: str) -> None:
@@ -76,9 +89,25 @@ class Kernel:
                 elif kind == "channel":
                     self._channels = [c for c in self._channels if getattr(c, "_jarvis_plugin", None) != name]
 
-    def _rebuild_services(self) -> None:
-        # No longer used for single-plugin reload; kept for full reloads if needed.
-        pass
+    def _state_snapshot(self) -> dict:
+        """Read-only view of kernel state (for the self-awareness tools)."""
+        provider = self._provider_svc
+        plugins = []
+        for name, p in sorted(self.manager.plugins.items()):
+            provides = p.manifest.provides or {}
+            plugins.append({
+                "name": name,
+                "kind": p.manifest.kind,
+                "tools": list(provides.get("tools", [])),
+            })
+        return {
+            "provider": type(provider).__name__ if provider is not None else "none",
+            "model": self._config.get("model", ""),
+            "n_plugins": len(self.manager.plugins),
+            "n_tools": len(self._tools),
+            "plugins": plugins,
+            "tools": sorted(self._tools.keys()),
+        }
 
     # ---- config hooks ----
     def _config_get(self, key: str, default: Any = None) -> Any:
@@ -143,7 +172,11 @@ class Kernel:
 
     # ---- runtime plugin control (used by the install tool + CLI install) ----
     def install_plugin(self, git_url: str, name: str | None = None) -> str:
-        """Clone a repo into plugins/, then hot-load it. Returns the plugin name."""
+        """Clone a repo into plugins/, then hot-load it. Returns the plugin name.
+
+        Raises PluginInstallError on unsafe names / clone failures. The
+        assistant-facing PluginApi wrapper adds URL + confirmation checks.
+        """
         from .install import clone_plugin
 
         dir_name = clone_plugin(git_url, self.plugins_dir, name=name)

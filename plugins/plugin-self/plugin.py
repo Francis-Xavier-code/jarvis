@@ -2,7 +2,7 @@
 
 Exposes tools the LLM (and users) can call to learn what JARVIS *is* and what
 it can currently do. This is the "who am I" surface — it reads the live kernel
-state (loaded plugins, registered tools) so the answer is always current, even
+state via the KernelApi.snapshot() view, so the answer is always current, even
 after hot-reload or a freshly installed plugin.
 
 Tools:
@@ -18,34 +18,28 @@ from jarvis.types import KernelApi
 def setup(kernel: KernelApi) -> None:
     @kernel.tool("self.whoami", "Describe who/what JARVIS is right now")
     def whoami() -> str:
-        k = kernel._kernel  # type: ignore[attr-defined]
-        provider = k._provider_svc
-        prov = type(provider).__name__ if provider is not None else "none"
-        model = k._config.get("model", "") or "(default)"
-        n_plugins = len(k.manager.plugins)
-        n_tools = len(k._tools)
+        s = kernel.snapshot()
+        model = s["model"] or "(default)"
         return (
             "I am JARVIS, a microkernel AI assistant where everything is a "
             "plugin. The kernel itself does almost nothing — providers, memory, "
             "channels, config and tools are all plugins. "
-            f"Currently loaded: {n_plugins} plugins, {n_tools} tools. "
-            f"Active model provider: {prov} (model={model}). "
+            f"Currently loaded: {s['n_plugins']} plugins, {s['n_tools']} tools. "
+            f"Active model provider: {s['provider']} (model={model}). "
             "I can hot-reload any capability without restarting."
         )
 
     @kernel.tool("self.capabilities", "List what JARVIS can currently do")
     def capabilities() -> str:
-        k = kernel._kernel  # type: ignore[attr-defined]
+        s = kernel.snapshot()
         lines = ["Loaded plugins and the tools/services they expose:"]
-        for name, plugin in sorted(k.manager.plugins.items()):
-            kind = plugin.manifest.kind
-            provides = plugin.manifest.provides or {}
-            tools = provides.get("tools", [])
+        for p in s["plugins"]:
+            tools = p["tools"]
             extra = f" (tools: {', '.join(tools)})" if tools else ""
-            lines.append(f"- {name} [{kind}]{extra}")
+            lines.append(f"- {p['name']} [{p['kind']}]{extra}")
         lines.append("")
         lines.append("All tools currently in the routing table:")
-        for tname in sorted(k._tools.keys()):
+        for tname in s["tools"]:
             lines.append(f"  - {tname}")
         return "\n".join(lines)
 

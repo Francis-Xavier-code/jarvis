@@ -20,7 +20,7 @@ CONFIG_PATH = Path(os.environ.get("JARVIS_CONFIG", "")) or (
 
 def setup(kernel: KernelApi) -> None:
     data = _read()
-    kernel._kernel.set_config(data)  # type: ignore[attr-defined]
+    kernel.set_config(data)
     kernel.service("config", _ConfigService(data))
 
 
@@ -48,3 +48,5 @@ class _ConfigService:
 
     def get(self, key: str, default=None):
         return self._data.get(key, default)
+
+# touched

@@ -83,7 +83,11 @@ def install(git_url: str, name: str | None) -> None:
     kernel = _make_kernel()
     kernel.manager.install_sources(SOURCES_TOML)  # ensure sources present
     kernel.load()
-    n = kernel.install_plugin(git_url, name)
+    try:
+        n = kernel.install_plugin(git_url, name)
+    except Exception as exc:  # noqa: BLE001
+        click.echo(f"[jarvis] install failed: {exc}", err=True)
+        raise click.exceptions.Exit(1)
     click.echo(f"[jarvis] installed plugin '{n}' from {git_url}")
 
 

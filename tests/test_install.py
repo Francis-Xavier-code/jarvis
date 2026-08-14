@@ -86,3 +86,42 @@ def test_uninstall_plugin(tmp_path: Path, kernel: Kernel) -> None:
     assert ok is True
     assert "y.ping" not in kernel._tools
     assert "y-plugin" not in kernel.manager.plugins
+
+def test_clone_rejects_unsafe_name(tmp_path: Path, kernel: Kernel) -> None:
+    """Path-traversal plugin names are refused before any clone happens."""
+    from jarvis.install import PluginInstallError
+
+    with pytest.raises(PluginInstallError):
+        kernel.install_plugin("https://example.com/repo.git", name="../../evil")
+    assert not (tmp_path / "evil").exists()
+
+
+def test_clone_rejects_bad_default_name(tmp_path: Path, kernel: Kernel) -> None:
+    """A URL whose last path segment is unsafe must be refused too."""
+    from jarvis.install import PluginInstallError
+
+    with pytest.raises(PluginInstallError):
+        kernel.install_plugin("https://example.com/..")
+    # nothing was cloned into plugins/
+    assert not list((tmp_path / "plugins").iterdir())
+
+
+def test_install_refuses_non_http_url_for_assistant(kernel: Kernel) -> None:
+    """The assistant-facing installer only accepts http(s) URLs."""
+    from jarvis.types import PluginApi
+
+    api = PluginApi(kernel)
+    assert "refused" in api.install_from_url("file:///etc/passwd")
+    assert "refused" in api.install_from_url("git@github.com:org/repo.git")
+
+
+def test_install_requires_user_confirmation(kernel: Kernel, tmp_path: Path) -> None:
+    """Assistant installs must pass the kernel confirmation gate."""
+    from jarvis.types import PluginApi
+
+    kernel.confirm_install = lambda url: False
+    api = PluginApi(kernel)
+    out = api.install_from_url("https://example.com/repo.git")
+    assert "refused" in out and "not confirmed" in out
+    assert not list((tmp_path / "plugins").iterdir())
+
