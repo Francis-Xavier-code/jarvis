@@ -45,6 +45,11 @@ class Kernel:
         self._tools[spec.name] = spec
 
     def _register_service(self, kind: str, impl: Any, plugin: str | None) -> None:
+        # stamp owner so reload can unregister precisely
+        try:
+            setattr(impl, "_jarvis_plugin", plugin)
+        except Exception:  # noqa: BLE001
+            pass
         self._services[kind] = impl
         if kind == "memory":
             self._memory_svc = impl
@@ -56,20 +61,24 @@ class Kernel:
     def _unregister_plugin(self, name: str) -> None:
         for tname in [k for k, v in self._tools.items() if v.plugin == name]:
             self._tools.pop(tname, None)
-        # drop services owned by this plugin (best-effort: rebuild from manager)
-        self._rebuild_services()
+        # Remove services owned by this plugin. Services are keyed by kind; we
+        # only clear the entry if it currently belongs to this plugin. Other
+        # plugins' services are left untouched (their setup re-registers them
+        # on their own reload).
+        for kind, impl in list(self._services.items()):
+            owner = getattr(impl, "_jarvis_plugin", None)
+            if owner == name:
+                self._services.pop(kind, None)
+                if kind == "memory":
+                    self._memory_svc = None
+                elif kind == "provider":
+                    self._provider_svc = None
+                elif kind == "channel":
+                    self._channels = [c for c in self._channels if getattr(c, "_jarvis_plugin", None) != name]
 
     def _rebuild_services(self) -> None:
-        self._services.clear()
-        self._memory_svc = None
-        self._provider_svc = None
-        self._channels = []
-        for plugin in self.manager.plugins.values():
-            if plugin.module is not None and hasattr(plugin.module, "register_services"):
-                try:
-                    plugin.module.register_services(KernelApi(self))
-                except Exception:  # noqa: BLE001
-                    pass
+        # No longer used for single-plugin reload; kept for full reloads if needed.
+        pass
 
     # ---- config hooks ----
     def _config_get(self, key: str, default: Any = None) -> Any:

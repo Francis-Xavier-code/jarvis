@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,8 @@ class PluginManager:
             if not toml_path.exists():
                 continue
             try:
-                manifest = PluginManifest.model_validate_toml(toml_path.read_text())
+                data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+                manifest = PluginManifest.model_validate(data["plugin"])
             except Exception as exc:  # noqa: BLE001
                 self._load_errors[child.name] = f"manifest invalid: {exc}"
                 continue
