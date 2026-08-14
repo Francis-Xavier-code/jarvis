@@ -128,30 +128,30 @@ class Kernel:
             model=self._config.get("model", ""),
         )
 
-        reply_text = ""
-        pending_calls: list[ToolCall] = []
-        for chunk in provider.chat(req):
-            if chunk.text:
-                reply_text += chunk.text
-            if chunk.tool_call:
-                pending_calls.append(chunk.tool_call)
-
-        # execute tool calls synchronously (v1), feed results back as a 2nd pass
-        if pending_calls:
+        # Agent loop: run provider, resolve any tool calls by feeding results
+        # back, repeat until a turn yields no tool calls (or hits max rounds).
+        MAX_ROUNDS = 4
+        for _ in range(MAX_ROUNDS):
+            reply_text = ""
+            pending_calls: list[ToolCall] = []
+            for chunk in provider.chat(req):
+                if chunk.text:
+                    reply_text += chunk.text
+                if chunk.tool_call:
+                    pending_calls.append(chunk.tool_call)
+            if not pending_calls:
+                break
             history.append(ChatMessage(role="assistant", content=reply_text))
             for call in pending_calls:
                 result = self._invoke_tool(call)
                 history.append(
                     ChatMessage(role="tool", content=result, name=call.name)
                 )
-            req2 = ChatRequest(
-                messages=history, tools=self.tools_snapshot(),
+            req = ChatRequest(
+                messages=history,
+                tools=self.tools_snapshot(),
                 model=self._config.get("model", ""),
             )
-            reply_text = ""
-            for chunk in provider.chat(req2):
-                if chunk.text:
-                    reply_text += chunk.text
 
         if memory is not None:
             memory.append(session, ChatMessage(role="user", content=user_text))
