@@ -19,6 +19,7 @@ A plugin is a directory under `plugins/`:
 plugins/<dir>/
 ├── plugin.toml      # REQUIRED — the manifest
 ├── plugin.py        # REQUIRED — the entrypoint (name from manifest `entry`)
+├── README.md        # REQUIRED — plugin's own docs (see §7.1)
 └── <other files>   # any supporting code
 ```
 
@@ -200,9 +201,30 @@ To make a repo cloneable as a JARVIS plugin:
 - [ ] any extra imports are soft-imported (since deps aren't auto-installed)
 - [ ] config read via `kernel.config`, not hardcoded secrets in source
 - [ ] tool functions return `str`
+- [ ] **`README.md` present** describing what the plugin is, what it exposes, and
+      how to configure/use it (see §7.1)
 
 That's the whole contract. **Pull it in with `jarvis install <url>` or list it
 in `plugin-sources.toml` for `jarvis bootstrap`.**
+
+### 7.1 Plugin README (required)
+
+Every plugin ships its **own** `README.md` so users know what it does without
+reading source. It must cover, at minimum:
+
+- **What it is** — one-paragraph purpose.
+- **kind + provided surface** — the `kind`, and every tool/service it registers,
+  with signatures and a one-line description. Tool signatures should stay in sync
+  with the actual `@kernel.tool(...)` calls in `plugin.py`.
+- **Configuration** — which config keys (or env vars) it reads, with examples.
+- **Dependencies** — any soft-imported packages the user may need to install.
+- **Install** — how to pull it (`jarvis install <url>` or `plugin-sources.toml`).
+- **Security notes** — especially for plugins that execute code, hit the network,
+  or clone other repos.
+
+The 6 bundled plugins (`config-core`, `provider-echo`, `memory-jsonl`,
+`channel-terminal`, `jarvis-install`, `jarvis-homeassistant`) each include a
+`README.md` that follows this template.
 
 ---
 
