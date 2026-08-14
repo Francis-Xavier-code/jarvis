@@ -158,26 +158,36 @@ def test_agent_identity_tool(tools: Kernel) -> None:
     assert "jarvis@jarvis.local" in out
     assert "-c user.email" in out  # git isolation hint
 
+def _toml_version(pdir: Path) -> str:
+    import tomllib
+
+    return tomllib.loads((pdir / "plugin.toml").read_text(encoding="utf-8"))["plugin"]["version"]
+
+
 def test_plugin_log_change_bumps_version_and_changelog(tools: Kernel, tmp_path: Path) -> None:
     """plugin.log_change adds a CHANGELOG entry and bumps plugin.toml version."""
-    out = _h(tools, "plugin.log_change")("agent-tools", "added a test hook", "Added")
-    assert "v0.2.0" in out  # Added -> minor bump from 0.1.0
-
     pdir = tmp_path / "plugins" / "agent-tools"
-    toml_text = (pdir / "plugin.toml").read_text(encoding="utf-8")
-    assert 'version = "0.2.0"' in toml_text
+    v = _toml_version(pdir)
+    major, minor, _ = map(int, v.split("."))
+    expected = f"{major}.{minor + 1}.0"  # Added -> minor bump
+    out = _h(tools, "plugin.log_change")("agent-tools", "added a test hook", "Added")
+    assert f"v{expected}" in out
 
+    assert f'version = "{expected}"' in (pdir / "plugin.toml").read_text(encoding="utf-8")
     changelog = (pdir / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## [0.2.0]" in changelog
+    assert f"## [{expected}]" in changelog
     assert "added a test hook" in changelog
-    # newest entry sits above the previous 0.1.0 section
-    assert changelog.index("## [0.2.0]") < changelog.index("## [0.1.0]")
+    # newest entry sits above the previous section
+    assert changelog.index(f"## [{expected}]") < changelog.index(f"## [{v}]")
 
 
 def test_plugin_log_change_patch_bump(tools: Kernel, tmp_path: Path) -> None:
+    pdir = tmp_path / "plugins" / "agent-tools"
+    major, minor, patch = map(int, _toml_version(pdir).split("."))
+    expected = f"{major}.{minor}.{patch + 1}"  # Fixed -> patch bump
     out = _h(tools, "plugin.log_change")("agent-tools", "fixed a bug", "Fixed")
-    assert "v0.1.1" in out
-    changelog = (tmp_path / "plugins" / "agent-tools" / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"v{expected}" in out
+    changelog = (pdir / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "### Fixed" in changelog
 
 
