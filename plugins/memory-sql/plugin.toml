@@ -1,7 +1,7 @@
 [plugin]
 name = "memory-sql"
 kind = "memory"
-version = "0.1.1"
+version = "0.1.3"
 entry = "plugin.py"
 hot_reload = true
 dependencies = []
