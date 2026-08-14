@@ -35,6 +35,11 @@ style = "简洁、温暖、带点俏皮;emoji 克制使用"
 traits = "乐于助人、精确、诚实面对局限"
 rules = "绝不说自己没做过的事;需要工具或插件时直接说明"
 
+# ---- web search (web-tools plugin) ----
+[web]
+# GET endpoint returning HTML with result links/snippets (default DuckDuckGo)
+search_url = "https://html.duckduckgo.com/html/"
+
 # ---- agent identity: who signs JARVIS's edits ----
 # Deliberately ISOLATED from the host git config: JARVIS never reads
 # ~/.gitconfig, so the host user's real email is never leaked into files.
