@@ -14,14 +14,15 @@ import click
 
 from .kernel import Kernel
 
-DEFAULT_PLUGINS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins")
-DEFAULT_DATA = os.path.expanduser("~/Library/Application Support/jarvis")
-
 
 def _make_kernel() -> Kernel:
-    plugins_dir = os.environ.get("JARVIS_PLUGINS", DEFAULT_PLUGINS)
-    data_dir = os.environ.get("JARVIS_DATA", DEFAULT_DATA)
-    kernel = Kernel(plugins_dir=plugins_dir, data_dir=data_dir)
+    DEFAULT_PLUGINS = os.environ.get("JARVIS_PLUGINS") or os.path.join(
+        os.getcwd(), "plugins"
+    )
+    DEFAULT_DATA = os.environ.get(
+        "JARVIS_DATA", os.path.expanduser("~/Library/Application Support/jarvis")
+    )
+    kernel = Kernel(plugins_dir=DEFAULT_PLUGINS, data_dir=DEFAULT_DATA)
     kernel.load()
     return kernel
 
