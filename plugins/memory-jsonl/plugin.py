@@ -17,7 +17,11 @@ from pathlib import Path
 
 from jarvis.types import ChatMessage, KernelApi
 
-DATA_ROOT = Path(os.environ.get("JARVIS_DATA", "")) or Path(
+# NOTE: Path("") is Path(".") which is truthy - an unset JARVIS_DATA must
+# fall through to the default instead of writing into the cwd (the historical
+# bug that scattered sessions/ into the project root).
+_env_data = os.environ.get("JARVIS_DATA")
+DATA_ROOT = Path(_env_data) if _env_data else Path(
     __file__
 ).resolve().parents[2] / "data"
 
@@ -110,9 +114,21 @@ class _JsonlMemory:
                 if role not in ("user", "assistant", "tool", "system"):
                     continue  # unknown/malformed role: drop
                 content = d.get("content", "") or ""
-                # name is part of the key so two DIFFERENT tools returning the
-                # same text are never collapsed (tool_call_id pairing relies
-                # on every tool result being present).
+                if role == "tool" or d.get("tool_calls"):
+                    # Structural rows: tool results and assistant
+                    # tool_calls are pairing-critical (tool_call_id
+                    # replay) - NEVER dedupe them, even when identical.
+                    out.append(
+                        ChatMessage(
+                            role=role,
+                            content=content,
+                            name=d.get("name"),
+                            tool_calls=d.get("tool_calls"),
+                            reasoning_content=d.get("reasoning_content"),
+                        )
+                    )
+                    continue
+                # Dedupe only plain text rows (double-submitted input).
                 key = (role, content, d.get("name"))
                 if key == prev_key:
                     continue  # consecutive duplicate (double-submitted input)
