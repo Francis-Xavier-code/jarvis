@@ -221,7 +221,7 @@ class OpenAIProvider:
                 tool_call=ToolCall(id=tc.get("id") or "", name=name, arguments=args)
             )
 
-        yield ChatChunk(done=True)
+        yield ChatChunk(done=True, usage=data.get("usage") or None)
 
 
 def setup(kernel: KernelApi) -> None:

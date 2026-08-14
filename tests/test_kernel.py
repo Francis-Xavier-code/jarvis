@@ -331,6 +331,38 @@ def test_chat_streaming_callbacks(kernel: Kernel) -> None:
     assert "demo.ping" in calls
     assert any("pong" in t for t in texts) or "pong" in out
 
+def test_secrets_redacted_in_reply(kernel: Kernel) -> None:
+    """A configured api key echoed by the model is masked in the output."""
+    kernel.set_config({"provider-openai": {"openai_api_key": "sk-abcdefghijklmnopqrstuvwxyz123456"}})
+
+    class _Leaky:
+        kind = "provider"
+
+        def chat(self, req):
+            yield ChatChunk(text="my key is sk-abcdefghijklmnopqrstuvwxyz123456")
+            yield ChatChunk(done=True)
+
+    kernel._provider_svc = _Leaky()
+    out = kernel.chat("sess-redact", "what is my key?")
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in out
+    assert "***" in out
+
+
+def test_credential_shapes_redacted_without_config(kernel: Kernel) -> None:
+    """Known credential shapes are masked even when not in the config."""
+    class _Leaky:
+        kind = "provider"
+
+        def chat(self, req):
+            yield ChatChunk(text="token: Bearer abcdefghijklmnopqrstuvwxyz1234567890")
+            yield ChatChunk(done=True)
+
+    kernel._provider_svc = _Leaky()
+    out = kernel.chat("sess-redact2", "hi")
+    assert "Bearer abcdefghijklmnopqrstuvwxyz1234567890" not in out
+    assert "***" in out
+
+
 
 
 

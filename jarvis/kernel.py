@@ -11,6 +11,8 @@ Responsibilities (and NOTHING else):
 from __future__ import annotations
 
 import json
+import re
+import time
 from typing import Any, Callable
 
 from .plugin import PluginManager
@@ -26,6 +28,14 @@ from .types import (
 
 # Config keys whose values should never be surfaced to the assistant.
 _SECRET_HINTS = ("api_key", "token", "secret", "password", "passwd")
+
+# Well-known credential shapes, redacted even when not in the config.
+_SECRET_PATTERNS = [
+    re.compile(r"sk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]{20,}"),
+]
 
 # Default conversation-rounds budget sent to the provider (older rounds are
 # trimmed from the request; full history is still persisted). 0/None = no trim.
@@ -329,27 +339,39 @@ class Kernel:
                     )
             return prefix + msgs
 
-        def _provider_chunks(req: ChatRequest) -> list[ChatChunk]:
-            """Provider chunks for this request, served from cache when possible."""
+        def _provider_chunks(req: ChatRequest) -> "tuple[list[ChatChunk], bool]":
+            """Provider chunks for this request, served from cache when possible.
+
+            Returns (chunks, from_cache) so the caller can log whether the
+            round hit the cache (i.e. cost no upstream tokens).
+            """
             if cache_svc is not None:
                 cached = cache_svc.get(req)
                 if cached is not None:
-                    return cached
+                    return cached, True
             try:
                 chunks = list(provider.chat(req))
             except Exception as exc:  # noqa: BLE001
-                return [ChatChunk(text=f"[error] provider failed: {exc}")]
+                return [ChatChunk(text=f"[error] provider failed: {exc}")], False
             if cache_svc is not None:
                 try:
                     cache_svc.put(req, chunks)
                 except Exception:  # noqa: BLE001
                     pass
-            return chunks
+            return chunks, False
 
         MAX_ROUNDS = 4
         reply_text = ""
         reasoning_text = ""
+        logger_svc = self._services.get("logger")
+        rounds = 0
+        total_prompt = 0
+        total_completion = 0
+        total_tool_calls = 0
+        any_cache_hit = False
+        last_model = ""
         for _ in range(MAX_ROUNDS):
+            rounds += 1
             snapshot = self.tools_snapshot()
             tool_table = {s.name: s for s in snapshot}
             req = ChatRequest(
@@ -357,21 +379,35 @@ class Kernel:
                 tools=snapshot,
                 model=self._config.get("model", ""),
             )
+            last_model = req.model
             reply_text = ""
             reasoning_text = ""
             pending_calls: list[ToolCall] = []
-            for chunk in _provider_chunks(req):
+            chunks, from_cache = _provider_chunks(req)
+            any_cache_hit = any_cache_hit or from_cache
+            for chunk in chunks:
                 if on_chunk is not None:
                     try:
-                        on_chunk(chunk)
+                        on_chunk(
+                            ChatChunk(
+                                text=self._redact(chunk.text) if chunk.text else None,
+                                reasoning=self._redact(chunk.reasoning) if chunk.reasoning else None,
+                                tool_call=chunk.tool_call,
+                                done=chunk.done,
+                            )
+                        )
                     except Exception:  # noqa: BLE001
                         pass
                 if chunk.text:
-                    reply_text += chunk.text
+                    reply_text += self._redact(chunk.text)
                 if chunk.reasoning:
-                    reasoning_text += chunk.reasoning
+                    reasoning_text += self._redact(chunk.reasoning)
                 if chunk.tool_call:
                     pending_calls.append(chunk.tool_call)
+            if chunks and chunks[-1].usage:
+                total_prompt += int(chunks[-1].usage.get("prompt_tokens") or 0)
+                total_completion += int(chunks[-1].usage.get("completion_tokens") or 0)
+            total_tool_calls += len(pending_calls)
             if not pending_calls:
                 break
             # Store the assistant turn WITH its tool_calls so the history can be
@@ -404,6 +440,20 @@ class Kernel:
 
         if memory is not None:
             self._persist_turn(memory, session, history, user_text, reply_text, reasoning_text)
+        if logger_svc is not None:
+            try:
+                logger_svc.log_turn({
+                    "ts": time.time(),
+                    "session": session,
+                    "model": last_model,
+                    "prompt_tokens": total_prompt,
+                    "completion_tokens": total_completion,
+                    "cache_hit": any_cache_hit,
+                    "rounds": rounds,
+                    "tool_calls": total_tool_calls,
+                })
+            except Exception:  # noqa: BLE001
+                pass
         return reply_text
 
     def _persist_turn(
@@ -430,6 +480,44 @@ class Kernel:
             session,
             ChatMessage(role="assistant", content=reply_text, reasoning_content=reasoning_text or None),
         )
+
+    def _secret_values(self) -> list[str]:
+        """Sensitive config values (api keys/tokens/secrets), recursively."""
+        values: list[str] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if isinstance(v, (dict, list)):
+                        walk(v)
+                    elif (
+                        isinstance(v, str)
+                        and len(v) >= 8
+                        and any(h in k.lower() for h in _SECRET_HINTS)
+                    ):
+                        values.append(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(self._config)
+        return values
+
+    def _redact(self, text: str) -> str:
+        """Mask configured secrets and known credential shapes in output.
+
+        Applied at the output boundary (streamed chunks, final reply, and the
+        persisted assistant message) so the LLM can never leak api keys or
+        tokens back to the user or into later context.
+        """
+        if not text:
+            return text
+        for value in self._secret_values():
+            if value and value in text:
+                text = text.replace(value, "***")
+        for pattern in _SECRET_PATTERNS:
+            text = pattern.sub("***", text)
+        return text
 
     def _trim_history(self, history: list[ChatMessage], max_rounds: int) -> list[ChatMessage]:
         """Keep only the most recent ``max_rounds`` conversation rounds.

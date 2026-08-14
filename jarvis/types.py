@@ -57,6 +57,9 @@ class ChatChunk:
     tool_call: "ToolCall | None" = None
     reasoning: str | None = None  # deepseek-style thinking content
     done: bool = False
+    # Token usage reported by the upstream (prompt/completion tokens), attached
+    # to the final (done) chunk when available.
+    usage: dict | None = None
 
 
 @dataclass

@@ -4,6 +4,8 @@ Subcommands:
   bootstrap   auto-clone every repo in plugin-sources.toml, then load plugins
               (one-shot setup; use `jarvis watch` to keep hot-reload running)
   install     clone one git repo into plugins/ and hot-load it (on demand)
+  stats       aggregate token usage / cache hits from the request log
+  doctor      health-check deps, config, plugins and the data dir
   chat        run the terminal channel (REPL); hot-reload watcher runs in background
   watch       load plugins and run ONLY the hot-reload watcher (no channel)
   telegram    run the telegram channel (deferred plugin; no-op until present)
@@ -89,6 +91,74 @@ def install(git_url: str, name: str | None) -> None:
         click.echo(f"[jarvis] install failed: {exc}", err=True)
         raise click.exceptions.Exit(1)
     click.echo(f"[jarvis] installed plugin '{n}' from {git_url}")
+
+
+@cli.command()
+def stats() -> None:
+    """Show token usage and cache-hit statistics from the request log."""
+    kernel = _make_kernel()
+    kernel.load()
+    logger = kernel._services.get("logger")
+    if logger is None:
+        click.echo("[jarvis] log-stats plugin not loaded; no logs recorded yet")
+        raise click.exceptions.Exit(1)
+    s = logger.stats()
+    if s.get("requests", 0) == 0:
+        click.echo("[jarvis] no requests logged yet")
+        return
+    click.echo(f"requests:           {s['requests']}")
+    click.echo(f"prompt tokens:      {s['prompt_tokens']}")
+    click.echo(f"completion tokens:  {s['completion_tokens']}")
+    click.echo(f"total tokens:       {s['total_tokens']}")
+    click.echo(f"cache hits:         {s['cache_hits']} ({s['cache_hit_rate'] * 100:.1f}%)")
+    click.echo("by model:")
+    for model, tokens in sorted(s["by_model"].items()):
+        click.echo(f"  {model}: {tokens} tokens")
+
+
+@cli.command()
+def doctor() -> None:
+    """Health-check the JARVIS installation (deps, config, plugins, data dir)."""
+    import importlib.util
+
+    ok = True
+
+    def check(label: str, condition: bool, detail: str = "") -> None:
+        nonlocal ok
+        if not condition:
+            ok = False
+        click.echo(f"[{'ok' if condition else '!!'}] {label}" + (f" - {detail}" if detail else ""))
+
+    check("requests (web/agent tools)", importlib.util.find_spec("requests") is not None)
+
+    kernel = _make_kernel()
+    try:
+        os.makedirs(kernel.data_dir, exist_ok=True)
+        probe = os.path.join(kernel.data_dir, ".doctor-write-test")
+        with open(probe, "w") as fh:
+            fh.write("x")
+        os.remove(probe)
+        check(f"data dir writable ({kernel.data_dir})", True)
+    except OSError as exc:
+        check("data dir writable", False, str(exc))
+
+    kernel.load()
+    if kernel.manager._load_errors:
+        for name, err in kernel.manager._load_errors.items():
+            check(f"plugin {name}", False, err)
+    else:
+        check(f"plugins loaded ({len(kernel.manager.plugins)})", True)
+
+    po = kernel._config.get("provider-openai", {})
+    key = po.get("openai_api_key") if isinstance(po, dict) else kernel._config.get("openai_api_key", "")
+    check("provider API key configured", bool(key), "set [provider-openai] openai_api_key in config.toml" if not key else "present (value hidden)")
+
+    click.echo("")
+    if ok:
+        click.echo("JARVIS looks healthy")
+    else:
+        click.echo("JARVIS has problems — see [!!] items above")
+        raise click.exceptions.Exit(1)
 
 
 @cli.command()
