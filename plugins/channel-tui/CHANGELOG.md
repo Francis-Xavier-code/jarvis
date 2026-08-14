@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.3] - 2026-08-15
+
+### Fixed
+- escape literal brackets in all dynamic text (user msgs, code blocks, tool args/results, thinking, confirm prompts) so Rich markup never raises MarkupError (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.2] - 2026-08-15
 
 ### Fixed

@@ -84,7 +84,7 @@ def _md_inline(text: str) -> str:
 def _md_block(line: str, in_code: bool) -> str:
     """Render one markdown line as Rich markup (block-level rules)."""
     if in_code:
-        return f"{_SURFACE} | {line}[/]"
+        return f"{_SURFACE} | {_esc(line)}[/]"
     stripped = line.strip()
     m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
     if m:
@@ -124,6 +124,11 @@ _KNOWN_TOOLS = {
 
 def _display_name(name: str) -> str:
     return _KNOWN_TOOLS.get(name, name.split(".")[-1].title() or name)
+
+
+def _esc(text: str) -> str:
+    """Escape literal square brackets for Rich markup (avoid MarkupError)."""
+    return text.replace("[", "\\[")
 
 
 def setup(kernel: KernelApi) -> None:
@@ -338,7 +343,7 @@ class _JarvisApp(App):
 
     def _show_confirm(self, prompt: str, done: threading.Event, result: list[bool]) -> None:
         self._pending_confirm = (prompt, done, result)
-        self._log(f"{_ORANGE}? {prompt} [y/N] (press y or n)[/]")
+        self._log(f"{_ORANGE}? {_esc(prompt)} [y/N] (press y or n)[/]")
         self.query_one("#in", Input).placeholder = "answer y or n"
         self.query_one("#status", Static).update(f"{_ORANGE}awaiting your y/N...[/]")
         self._focus_input()
@@ -374,7 +379,7 @@ class _JarvisApp(App):
             return
         if self._busy:
             self._queue.put(text)
-            self._log(f"{_DIM}queued (JARVIS busy): {text}[/]")
+            self._log(f"{_DIM}queued (JARVIS busy): {_esc(text)}[/]")
             return
         self._start_chat(text)
 
@@ -466,9 +471,9 @@ class _JarvisApp(App):
         self._current_tool = None
         # user bubble (structured message)
         lines = text.split("\n")
-        self._new_message(f"{_SECONDARY}you >[/] {lines[0]}", "user-msg")
+        self._new_message(f"{_SECONDARY}you >[/] {_esc(lines[0])}", "user-msg")
         for extra in lines[1:]:
-            self._new_message(f"  {extra}", "user-msg")
+            self._new_message(f"  {_esc(extra)}", "user-msg")
         # visible "thinking" animation while waiting for the first token
         self._start_spinner("thinking...")
 
@@ -482,7 +487,7 @@ class _JarvisApp(App):
                     on_tool_done=self._on_tool_done,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.call_from_thread(self._log, f"{_ORANGE}[error] {exc}[/]")
+                self.call_from_thread(self._log, f"{_ORANGE}[error] {_esc(str(exc))}[/]")
             finally:
                 self.call_from_thread(self._finish_turn)
 
@@ -526,7 +531,7 @@ class _JarvisApp(App):
         if self._current_thinking is None:
             return
         if self._thinking_visible:
-            self._update_message(self._current_thinking, f"Thinking (expanded):\n{self._thinking}")
+            self._update_message(self._current_thinking, f"Thinking (expanded):\n{_esc(self._thinking)}")
         else:
             self._update_message(self._current_thinking, f"Thinking... ({len(self._thinking)} ch, ctrl+o)")
         self._scroll_end()
@@ -579,7 +584,7 @@ class _JarvisApp(App):
         return rendered
 
     def _on_tool(self, call) -> None:
-        args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
+        args = ", ".join(f"{k}={_esc(repr(v))}" for k, v in list(call.arguments.items())[:4])
         label = f"{_display_name(call.name)}({args})"
         self._current_tool_label = label
         self._current_tool = self._new_message(f"  {_SPINNER[0]} {label}", "tool-msg")
@@ -598,7 +603,7 @@ class _JarvisApp(App):
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-        summary = (result or "").strip().split("\n", 1)[0][:80]
+        summary = _esc((result or "").strip().split("\n", 1)[0][:80])
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
         mark = "x" if denied else "+"
         color = _DIM if denied else _GREEN
