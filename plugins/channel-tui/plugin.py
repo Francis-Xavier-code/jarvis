@@ -22,7 +22,7 @@ from jarvis.types import KernelApi
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
-    from textual.widgets import Footer, Header, Input, RichLog
+    from textual.widgets import Footer, Header, Input, RichLog, Static
     _TEXTUAL_OK = True
 except ImportError:  # pragma: no cover
     _TEXTUAL_OK = False
@@ -31,6 +31,12 @@ _GREEN = "[#33ff57]"
 _YELLOW = "[#ffd700]"
 _DIM = "[dim]"
 _CYAN = "[#00d7ff]"
+
+# tool-call spinner frames (braille dots)
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+# tool-call spinner frames (braille dots)
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 def setup(kernel: KernelApi) -> None:
@@ -51,14 +57,16 @@ class _JarvisApp(App):
         padding: 0 1;
         margin: 0 1;
     }
+    #status {
+        height: 1;
+        margin: 0 1;
+        content-align: left middle;
+    }
     #in {
         dock: bottom;
         height: 3;
         margin: 0 1 1 1;
         border: tall $accent;
-    }
-    .confirm-prompt {
-        padding: 1 2;
     }
     """
 
@@ -76,11 +84,15 @@ class _JarvisApp(App):
         self._hist_idx: "int | None" = None
         self._partial = ""
         self._pending_confirm: "tuple[str, threading.Event, list[bool]] | None" = None
+        self._spinner_text = ""
+        self._spinner_frame = 0
+        self._spinner_timer = None
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield RichLog(id="out", wrap=True, markup=True, highlight=True)
+        yield Static("", id="status")
         yield Input(id="in", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
         yield Footer()
 
@@ -210,13 +222,34 @@ class _JarvisApp(App):
 
         threading.Thread(target=work, daemon=True).start()
 
+    # ---- tool-call spinner ----
+    def _start_spinner(self, text: str) -> None:
+        self._spinner_text = text
+        self._spinner_frame = 0
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+        self._spinner_timer = self.set_interval(0.08, self._tick_spinner)
+        self._tick_spinner()
+
+    def _tick_spinner(self) -> None:
+        frame = _SPINNER[self._spinner_frame % len(_SPINNER)]
+        self._spinner_frame += 1
+        self.query_one("#status", Static).update(f"{_YELLOW}{frame} {self._spinner_text}[/]")
+
+    def _stop_spinner(self) -> None:
+        if self._spinner_timer is not None:
+            self._spinner_timer.stop()
+            self._spinner_timer = None
+        self.query_one("#status", Static).update("")
+
     def _on_chunk(self, chunk) -> None:
         if chunk.text:
             self.call_from_thread(self._write, chunk.text)
 
     def _on_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:4])
-        self.call_from_thread(self._write, f"{_YELLOW}tool: {call.name}({args})[/]")
+        self.call_from_thread(self._write, f"{_YELLOW}⚙ {call.name}({args})[/]")
+        self.call_from_thread(self._start_spinner, f"working: {call.name}({args})")
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
         summary = (result or "").strip().split("\n", 1)[0][:80]
@@ -224,6 +257,7 @@ class _JarvisApp(App):
         mark = "x" if denied else "ok"
         color = _DIM if denied else _GREEN
         self.call_from_thread(self._write, f"{color} {mark} {call.name} -> {summary} ({duration:.1f}s)[/]")
+        self.call_from_thread(self._stop_spinner)
 
     def _finish_turn(self) -> None:
         self._set_busy(False)

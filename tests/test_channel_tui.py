@@ -48,3 +48,13 @@ def test_app_constructs_with_textual(kernel: Kernel) -> None:
     app = mod._JarvisApp(kernel)
     assert app is not None
     assert app._kernel is kernel
+
+def test_spinner_helpers_present(kernel: Kernel) -> None:
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    assert mod._SPINNER  # non-empty spinner frames
+    app = mod._JarvisApp(kernel)
+    for attr in ("_start_spinner", "_tick_spinner", "_stop_spinner"):
+        assert hasattr(app, attr)
+
