@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
     "pydantic>=2.5",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
@@ -26,3 +27,5 @@ packages = ["jarvis"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 05:11:44 ---

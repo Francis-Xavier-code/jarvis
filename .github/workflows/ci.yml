@@ -26,6 +26,9 @@ jobs:
       - name: Create venv and install (dev + ui extras)
         run: uv venv --clear && uv pip install -e ".[dev,ui]"
 
+      - name: Prepare example config (config.toml is gitignored in CI)
+        run: cp config.toml.example config.toml
+
       - name: Run tests
         run: uv run pytest -q
 
