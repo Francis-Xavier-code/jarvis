@@ -162,6 +162,28 @@ class _TerminalChannel:
         color = _DIM if denied else _GREEN
         print(_c(color, f" {mark} {call.name} -> {summary} ({duration:.1f}s)"), flush=True)
 
+def _render_reply(kernel, reply: str) -> "str | None":
+    """Buffered-mode rendering: when a `render` service is registered (e.g. the
+    mdcat-render plugin), use it and return its output; otherwise return None
+    and the caller uses the built-in Markdown->ANSI renderer. A broken
+    renderer never breaks chat - it just falls back."""
+    svc = None
+    try:
+        svc = kernel.get_service("render")
+    except AttributeError:  # older kernels: poke the private registry
+        services = getattr(kernel, "_services", {})
+        svc = services.get("render") if isinstance(services, dict) else None
+    if svc is not None and hasattr(svc, "render"):
+        try:
+            return svc.render(reply)
+        except Exception:  # noqa: BLE001
+            pass
+    return None
+
+
+class _TerminalChannel:
+    kind = "terminal"
+
     def run(self, kernel) -> None:
         session = "terminal"
         _setup_readline(kernel.data_dir)
@@ -198,7 +220,11 @@ class _TerminalChannel:
                     print(_c(_DIM, "\u231b thinking\u2026"), flush=True)
                     reply = kernel.chat(session, text)
                     print()
-                    print("jarvis>", render_md(reply))
+                    rendered = _render_reply(kernel, reply)
+                    if rendered is None:
+                        print("jarvis>", render_md(reply))
+                    else:
+                        print(rendered)  # mdcat-style renderer owns the frame
             except KeyboardInterrupt:
                 print("\n[jarvis] interrupted.")
 
@@ -210,4 +236,4 @@ def setup(kernel: KernelApi) -> None:
 def teardown(kernel: KernelApi) -> None:
     pass
 
-# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:42:40 ---
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 03:33:28 ---

@@ -227,6 +227,10 @@ class Kernel:
     def tools_snapshot(self) -> list[ToolSpec]:
         return list(self._tools.values())
 
+    def get_service(self, kind: str):
+        """Public accessor for a registered plugin service (channels, tools)."""
+        return self._services.get(kind)
+
     def run_hot_reload_check(self) -> list[str]:
         return self.manager.check_hot_reload()
 
