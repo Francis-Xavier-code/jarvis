@@ -171,7 +171,11 @@ class _SplashScreen(Screen):
         self._big_rows = render_big("JARVIS")
         self._step = 0
         self._stimer = self.set_interval(0.05, self._shimmer)
-        self.set_timer(2.8, self.dismiss)
+        # dismiss() returns an awaitable; wrap it so set_timer does not await it
+        self.set_timer(2.8, self._dismiss_now)
+
+    def _dismiss_now(self) -> None:
+        self.dismiss()
 
     def _next_frame(self) -> None:
         self.query_one("#splash-whale", Static).update(self._frames[self._fi % len(self._frames)])
