@@ -33,30 +33,37 @@ def _cfg(kernel: KernelApi) -> dict:
     }
 
 
-def _call(path: str, method: str = "get", json: dict | None = None) -> str:
+def _call(base: str, token: str, path: str, method: str = "get", json: dict | None = None) -> str:
     if requests is None:
         return "[hass] missing dependency: pip install requests"
-    base = os.environ.get("_HA_BASE", "")
-    token = os.environ.get("_HA_TOKEN", "")
     if not base:
         return "[hass] not configured (set ha_base_url/ha_token)"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    r = requests.request(method, f"{base}/api/{path}", headers=headers, json=json, timeout=10)
-    return f"{r.status_code}: {r.text[:200]}"
+    try:
+        r = requests.request(method, f"{base}/api/{path}", headers=headers, json=json, timeout=10)
+        return f"{r.status_code}: {r.text[:200]}"
+    except Exception as exc:  # noqa: BLE001
+        return f"[hass] request failed: {exc}"
 
 
 def setup(kernel: KernelApi) -> None:
+    # Tools re-read config on every call so a config hot-reload takes effect
+    # without restarting the plugin.
+
     @kernel.tool("hass.light_on", "Turn on a light entity", {"entity_id": {"type": "string"}})
     def light_on(entity_id: str) -> str:
-        return _call(f"services/light/turn_on", "post", {"entity_id": entity_id})
+        c = _cfg(kernel)
+        return _call(c["base"], c["token"], "services/light/turn_on", "post", {"entity_id": entity_id})
 
     @kernel.tool("hass.light_off", "Turn off a light entity", {"entity_id": {"type": "string"}})
     def light_off(entity_id: str) -> str:
-        return _call(f"services/light/turn_off", "post", {"entity_id": entity_id})
+        c = _cfg(kernel)
+        return _call(c["base"], c["token"], "services/light/turn_off", "post", {"entity_id": entity_id})
 
     @kernel.tool("hass.status", "Get the state of an entity", {"entity_id": {"type": "string"}})
     def status(entity_id: str) -> str:
-        return _call(f"states/{entity_id}")
+        c = _cfg(kernel)
+        return _call(c["base"], c["token"], f"states/{entity_id}")
 
 
 def teardown(kernel: KernelApi) -> None:
