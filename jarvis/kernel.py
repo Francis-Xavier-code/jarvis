@@ -110,6 +110,37 @@ class Kernel:
     def run_hot_reload_check(self) -> list[str]:
         return self.manager.check_hot_reload()
 
+    # ---- runtime plugin control (used by the install tool + CLI install) ----
+    def install_plugin(self, git_url: str, name: str | None = None) -> str:
+        """Clone a repo into plugins/, then hot-load it. Returns the plugin name."""
+        from .install import clone_plugin
+
+        dir_name = clone_plugin(git_url, self.plugins_dir, name=name)
+        plugin = self.manager.load_one(dir_name)
+        if plugin is None:
+            return dir_name
+        return plugin.name
+
+    def uninstall_plugin(self, name: str) -> bool:
+        # resolve by manifest name OR directory name
+        plugin = self.manager.plugins.get(name)
+        if plugin is None:
+            for p in self.manager.plugins.values():
+                if p.path.name == name or p.name == name:
+                    plugin = p
+                    break
+        if plugin is None:
+            return False
+        module = plugin.module
+        if module is not None and hasattr(module, "teardown"):
+            try:
+                module.teardown(KernelApi(self))
+            except Exception:  # noqa: BLE001
+                pass
+        self._unregister_plugin(plugin.name)
+        self.manager.plugins.pop(plugin.name, None)
+        return True
+
     # ---- agent loop ----
     def chat(self, session: str, user_text: str) -> str:
         """One conversation turn. Returns assistant text."""

@@ -1,30 +1,37 @@
 """JARVIS command-line entrypoint.
 
 Subcommands:
-  bootstrap   load all plugins from plugins/ (default behaviour on every start)
+  bootstrap   auto-clone every repo in plugin-sources.toml, then load plugins
+  install     clone one git repo into plugins/ and hot-load it (on demand)
   chat        run the terminal channel (REPL)
   telegram    run the telegram channel (deferred plugin; no-op until present)
 """
 from __future__ import annotations
 
 import os
-import sys
 
 import click
 
 from .kernel import Kernel
 
+SOURCES_TOML = os.environ.get("JARVIS_SOURCES", "plugin-sources.toml")
+
 
 def _make_kernel() -> Kernel:
-    DEFAULT_PLUGINS = os.environ.get("JARVIS_PLUGINS") or os.path.join(
+    plugins_dir = os.environ.get("JARVIS_PLUGINS") or os.path.join(
         os.getcwd(), "plugins"
     )
-    DEFAULT_DATA = os.environ.get(
+    data_dir = os.environ.get(
         "JARVIS_DATA", os.path.expanduser("~/Library/Application Support/jarvis")
     )
-    kernel = Kernel(plugins_dir=DEFAULT_PLUGINS, data_dir=DEFAULT_DATA)
-    kernel.load()
+    kernel = Kernel(plugins_dir=plugins_dir, data_dir=data_dir)
     return kernel
+
+
+def _load_with_sources(kernel: Kernel) -> list[str]:
+    cloned = kernel.manager.install_sources(SOURCES_TOML)
+    kernel.load()
+    return cloned
 
 
 @click.group()
@@ -34,8 +41,11 @@ def cli() -> None:
 
 @cli.command()
 def bootstrap() -> None:
-    """Discover and load every plugin under plugins/."""
+    """Auto-clone repos from plugin-sources.toml, then load all plugins."""
     kernel = _make_kernel()
+    cloned = _load_with_sources(kernel)
+    if cloned:
+        click.echo(f"[jarvis] cloned sources: {sorted(cloned)}")
     loaded = sorted(kernel.manager.plugins.keys())
     click.echo(f"[jarvis] loaded plugins: {loaded}")
     if kernel.manager._load_errors:
@@ -44,16 +54,28 @@ def bootstrap() -> None:
 
 
 @cli.command()
+@click.argument("git_url")
+@click.option("--name", default=None, help="Plugin name (defaults to repo name)")
+def install(git_url: str, name: str | None) -> None:
+    """Clone GIT_URL into plugins/ and hot-load it."""
+    kernel = _make_kernel()
+    kernel.manager.install_sources(SOURCES_TOML)  # ensure sources present
+    kernel.load()
+    n = kernel.install_plugin(git_url, name)
+    click.echo(f"[jarvis] installed plugin '{n}' from {git_url}")
+
+
+@cli.command()
 def chat() -> None:
     """Run the terminal REPL channel."""
     kernel = _make_kernel()
+    _load_with_sources(kernel)
     channel = None
     for svc in kernel._channels:
         if getattr(svc, "kind", "") == "terminal":
             channel = svc
             break
     if channel is None:
-        # fallback minimal REPL if no terminal plugin registered a channel
         click.echo("[jarvis] no terminal channel plugin; using built-in REPL")
         _builtin_repl(kernel)
         return

@@ -1,0 +1,12 @@
+# JARVIS plugin sources — "default-pack a clone"
+#
+# Each [source.<name>] entry is a git repo that `jarvis bootstrap` clones into
+# plugins/<name>/ on first run (and fast-forward pulls on later runs). Because
+# the cloned repo must follow the JARVIS plugin.toml convention, the normal
+# plugin loader picks it up automatically — no kernel changes needed.
+#
+# Example (uncomment to enable):
+# [source.jarvis-homeassistant]
+# git = "https://github.com/your-org/jarvis-homeassistant.git"
+#
+# Leave this file empty to bootstrap only locally-present plugins.

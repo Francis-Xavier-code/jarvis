@@ -102,6 +102,19 @@ class KernelApi:
         return self._kernel.config_api
 
 
+class PluginApi:
+    """Runtime plugin control exposed to tools (e.g. jarvis.install_plugin)."""
+
+    def __init__(self, kernel: "Any") -> None:
+        self._kernel = kernel
+
+    def install_from_url(self, git_url: str, name: str | None = None) -> str:
+        return self._kernel.install_plugin(git_url, name)
+
+    def uninstall(self, name: str) -> bool:
+        return self._kernel.uninstall_plugin(name)
+
+
 class ConfigApi:
     """Read/subscribe config exposed by the config plugin."""
 

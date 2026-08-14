@@ -84,6 +84,31 @@ class PluginManager:
             found.append(Plugin(child, manifest))
         return found
 
+    def install_sources(self, sources_toml: str = "plugin-sources.toml") -> list[str]:
+        """Bootstrap: clone every repo listed in ``plugin-sources.toml``.
+
+        Each entry is [source.<name>] git = "..." . Already-cloned plugins are
+        fast-forward pulled. Returns the list of plugin names now present.
+        """
+        from .install import clone_plugin
+
+        p = Path(sources_toml)
+        if not p.exists():
+            return []
+        try:
+            data = tomllib.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            self._load_errors["_sources"] = f"sources invalid: {exc}"
+            return []
+        names: list[str] = []
+        for key, val in data.get("source", {}).items():
+            git_url = val.get("git") if isinstance(val, dict) else None
+            if not git_url:
+                continue
+            name = clone_plugin(git_url, str(self.plugins_dir), name=key)
+            names.append(name)
+        return names
+
     def load_all(self) -> None:
         for plugin in self.discover():
             self.plugins[plugin.name] = plugin
@@ -137,3 +162,20 @@ class PluginManager:
                 if self.reload(name):
                     reloaded.append(name)
         return reloaded
+
+    def load_one(self, name: str) -> "Plugin | None":
+        """Load a single plugin that has just appeared on disk (e.g. cloned).
+
+        Matches by **directory name** (what clone_plugin creates), not the
+        manifest's internal name — they can legitimately differ. Returns the
+        loaded Plugin, or None if not found.
+        """
+        if name in self.plugins:
+            self.reload(name)
+            return self.plugins[name]
+        for plugin in self.discover():
+            if plugin.path.name == name:
+                self.plugins[plugin.name] = plugin
+                self._load_plugin(plugin)
+                return plugin
+        return None
