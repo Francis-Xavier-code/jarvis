@@ -17,6 +17,7 @@ from __future__ import annotations
 import queue
 import re
 import threading
+import time
 
 from jarvis.types import KernelApi
 
@@ -155,6 +156,7 @@ class _JarvisApp(App):
         self._spinner_text = ""
         self._spinner_frame = 0
         self._spinner_timer = None
+        self._turn_start = 0.0
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
@@ -196,6 +198,7 @@ class _JarvisApp(App):
         self._pending_confirm = (prompt, done, result)
         self._write(f"{_YELLOW}? {prompt} [y/N] (press y or n)[/]")
         self.query_one("#in", Input).placeholder = "answer y or n"
+        self.query_one("#status", Static).update(f"{_YELLOW}⏳ awaiting your y/N[/]")
         self._focus_input()
 
     def _answer_confirm(self, ans: bool) -> None:
@@ -279,9 +282,12 @@ class _JarvisApp(App):
         self._md_part = ""
         self._in_code = False
         self._assistant_prefix = False
+        self._turn_start = time.time()
         self._write("")
         self._write(f"{_CYAN}┌─ you[/]")
         self._write(f"{_CYAN}│ {text}[/]")
+        # visible "thinking" animation while waiting for the first token
+        self._start_spinner("thinking…")
 
         def work() -> None:
             try:
@@ -321,6 +327,8 @@ class _JarvisApp(App):
 
     def _on_chunk(self, chunk) -> None:
         if chunk.text:
+            # text arriving: drop the thinking/tool spinner (re-armed by _on_tool)
+            self.call_from_thread(self._stop_spinner)
             self.call_from_thread(self._stream_md, chunk.text)
 
     # ---- streaming markdown -> rich markup ----
@@ -369,13 +377,22 @@ class _JarvisApp(App):
 
     def _finish_turn(self) -> None:
         self._flush_md()
+        self._stop_spinner()
         self._set_busy(False)
+        elapsed = time.time() - self._turn_start if self._turn_start else 0.0
         self._write("")
+        self.query_one("#status", Static).update(f"{_GREEN}✓ done ({elapsed:.1f}s)[/]")
+        self.set_timer(1.2, self._clear_status)
         if not self._queue.empty():
             nxt = self._queue.get_nowait()
             self._start_chat(nxt)
         else:
             self._focus_input()
+
+    def _clear_status(self) -> None:
+        """Clear the transient completion status unless a new turn already owns it."""
+        if not self._busy and self._spinner_timer is None:
+            self.query_one("#status", Static).update("")
 
     def action_clear(self) -> None:
         self.query_one("#out", RichLog).clear()
