@@ -77,11 +77,21 @@ class Kernel:
             return False
 
     @staticmethod
-    def _default_confirm_install(git_url: str) -> bool:
-        """Interactive y/N confirmation for assistant-initiated plugin installs."""
+    def _default_confirm_install(prompt: str) -> bool:
+        """Interactive y/N confirmation for assistant-initiated actions.
+
+        The prompt starts on a fresh line so it never glues onto streaming
+        output, empty/unknown answers are re-asked (so a half-typed message
+        from mid-reply cannot be misread as an answer), and bare Enter = no.
+        """
         try:
-            answer = input(f"[jarvis] install plugin from {git_url}? [y/N] ").strip().lower()
-            return answer in ("y", "yes")
+            while True:
+                answer = input(f"\n{prompt} [y/N] ").strip().lower()
+                if answer in ("y", "yes"):
+                    return True
+                if answer in ("", "n", "no"):
+                    return False
+                print("[jarvis] please answer y or N")
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -262,6 +272,7 @@ class Kernel:
         user_text: str,
         on_chunk: Callable[[ChatChunk], None] | None = None,
         on_tool: Callable[[ToolCall], None] | None = None,
+        on_tool_done: Callable[[ToolCall, str, float], None] | None = None,
     ) -> str:
         """One conversation turn. Returns assistant text.
 
@@ -435,8 +446,28 @@ class Kernel:
                         on_tool(call)
                     except Exception:  # noqa: BLE001
                         pass
+                t_start = time.time()
                 result = self._invoke_tool(call, tool_table)
+                if on_tool_done is not None:
+                    try:
+                        on_tool_done(call, result, time.time() - t_start)
+                    except Exception:  # noqa: BLE001
+                        pass
                 history.append(ChatMessage(role="tool", content=result, name=call.name))
+
+        # Persist the final assistant reply too: text-only rounds (no tool
+        # calls) never entered the loop's history.append above, so without
+        # this the last answer would be missing from the saved session. The
+        # model then cannot see what it already said and tends to repeat
+        # itself on the next turn.
+        if reply_text or reasoning_text:
+            history.append(
+                ChatMessage(
+                    role="assistant",
+                    content=reply_text,
+                    reasoning_content=reasoning_text or None,
+                )
+            )
 
         if memory is not None:
             self._persist_turn(memory, session, history, user_text, reply_text, reasoning_text)
@@ -564,3 +595,5 @@ class Kernel:
             return str(spec.handler(**call.arguments))
         except Exception as exc:  # noqa: BLE001
             return f"[error] {call.name} failed: {exc}"
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:59:00 ---

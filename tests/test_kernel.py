@@ -362,6 +362,18 @@ def test_credential_shapes_redacted_without_config(kernel: Kernel) -> None:
     assert "Bearer abcdefghijklmnopqrstuvwxyz1234567890" not in out
     assert "***" in out
 
+def test_tool_done_callback_fires(kernel: Kernel) -> None:
+    """on_tool_done reports each tool call's result and duration."""
+    done: list[tuple] = []
+    kernel.chat(
+        "sess-td",
+        "please use a tool",
+        on_tool_done=lambda c, r, d: done.append((c.name, r, d)),
+    )
+    assert any(name == "demo.ping" for name, _, _ in done)
+    assert all(d >= 0 for _, _, d in done)
+
+
 
 
 

@@ -148,6 +148,20 @@ class _TerminalChannel:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:5])
         print(_c(_YELLOW, f"\n⚙ {call.name}({args})"), flush=True)
 
+    def _stream_tool_done(self, call, result: str, duration: float) -> None:
+        """Show the tool's outcome so the user knows work actually happened."""
+        summary = result.strip().split("\n", 1)[0] if result else "(no output)"
+        if len(summary) > 90:
+            summary = summary[:87] + "..."
+        denied = (
+            "not confirmed" in result
+            or result.startswith("[error]")
+            or "refused" in result
+        )
+        mark = "✗" if denied else "✓"
+        color = _DIM if denied else _GREEN
+        print(_c(color, f" {mark} {call.name} -> {summary} ({duration:.1f}s)"), flush=True)
+
     def run(self, kernel) -> None:
         session = "terminal"
         _setup_readline(kernel.data_dir)
@@ -173,7 +187,11 @@ class _TerminalChannel:
                 if stream:
                     print(_c(_DIM, "\u231b thinking\u2026 (Ctrl-C interrupts; your next input queues)"), flush=True)
                     reply = kernel.chat(
-                        session, text, on_chunk=self._stream_chunk, on_tool=self._stream_tool
+                        session,
+                        text,
+                        on_chunk=self._stream_chunk,
+                        on_tool=self._stream_tool,
+                        on_tool_done=self._stream_tool_done,
                     )
                     print()
                 else:
