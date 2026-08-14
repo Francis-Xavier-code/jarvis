@@ -15,9 +15,9 @@ jarvis chat
 ```
 
 ```
-JARVIS (terminal channel). Type 'exit' to quit.
+JARVIS (终端通道)。输入 'exit' 退出。
 you> hello jarvis
-jarvis> [echo] hello jarvis
+jarvis> 我是 JARVIS,你的微内核助手 —— 有什么尽管问,或调用工具。
 you> exit
 ```
 

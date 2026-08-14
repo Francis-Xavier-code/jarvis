@@ -14,9 +14,12 @@ JARVIS 只有一条原则:内核几乎什么都不做。LLM provider、记忆后
 jarvis/            # 微内核(types、插件管理器、kernel、cli)
 plugins/           # 所有能力都以普通子目录的形式放在这里
   config-core/     # 配置即插件(持有 config.toml,暴露 get/watch)
-  provider-echo/   # 桩 provider(没有真实 LLM)——用来证明整条链路
+  provider-openai/ # 真实 LLM 大脑(OpenAI 兼容;默认 = opencodego 聚合商)
   memory-jsonl/    # 按会话存储的对话历史(JSONL)
   channel-terminal/# 终端 REPL 通道
+  jarvis-install/  # 拉取能力,暴露为插件
+  jarvis-homeassistant/ # 示例:证明"克隆 -> 可用插件"的 HA 包装器
+  plugin-self/     # 自我认知(whoami / capabilities / version)
 ```
 
 ## 运行

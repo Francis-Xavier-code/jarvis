@@ -110,6 +110,37 @@ class Kernel:
     def run_hot_reload_check(self) -> list[str]:
         return self.manager.check_hot_reload()
 
+    def start_hot_reload_watcher(self, interval: float = 1.0) -> None:
+        """Start a background thread that auto-reloads changed plugins.
+
+        Replaces the manual ``run_hot_reload_check()``; the kernel now watches
+        plugin directories continuously without any process restart.
+        """
+        if getattr(self, "_watcher_thread", None) is not None:
+            return
+        import threading
+
+        self._watcher_active = True
+        self._watcher_interval = interval
+
+        def _loop() -> None:
+            import time
+
+            while getattr(self, "_watcher_active", False):
+                try:
+                    self.manager.check_hot_reload()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(self._watcher_interval)
+
+        t = threading.Thread(target=_loop, name="jarvis-hotreload", daemon=True)
+        t.start()
+        self._watcher_thread = t
+
+    def stop_hot_reload_watcher(self) -> None:
+        self._watcher_active = False
+        self._watcher_thread = None
+
     # ---- runtime plugin control (used by the install tool + CLI install) ----
     def install_plugin(self, git_url: str, name: str | None = None) -> str:
         """Clone a repo into plugins/, then hot-load it. Returns the plugin name."""

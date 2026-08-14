@@ -224,9 +224,9 @@ reading source. It must cover, at minimum:
 - **Security notes** — especially for plugins that execute code, hit the network,
   or clone other repos.
 
-The 6 bundled plugins (`config-core`, `provider-echo`, `memory-jsonl`,
-`channel-terminal`, `jarvis-install`, `jarvis-homeassistant`) each include a
-`README.md` that follows this template.
+The 7 bundled plugins (`config-core`, `provider-openai`, `memory-jsonl`,
+`channel-terminal`, `jarvis-install`, `jarvis-homeassistant`, `plugin-self`) each
+include a `README.md` that follows this template.
 
 ---
 

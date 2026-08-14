@@ -208,8 +208,9 @@ v1.0 中 `plugin.toml` 里的 `dependencies` **已声明但内核不会执行**�
 - **安装** —— 如何拉取(`jarvis install <url>` 或 `plugin-sources.toml`)。
 - **安全提示** —— 尤其是会执行代码、访问网络或克隆其他仓库的插件。
 
-内置的 6 个插件(`config-core`、`provider-echo`、`memory-jsonl`、`channel-terminal`、
-`jarvis-install`、`jarvis-homeassistant`)各自都含一份遵循本模板的 `README.md`。
+内置的 7 个插件(`config-core`、`provider-openai`、`memory-jsonl`、`channel-terminal`、
+`jarvis-install`、`jarvis-homeassistant`、`plugin-self`)各自都含一份遵循本模板的
+`README.md`。
 
 ---
 

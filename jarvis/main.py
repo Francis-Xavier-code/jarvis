@@ -3,7 +3,8 @@
 Subcommands:
   bootstrap   auto-clone every repo in plugin-sources.toml, then load plugins
   install     clone one git repo into plugins/ and hot-load it (on demand)
-  chat        run the terminal channel (REPL)
+  chat        run the terminal channel (REPL); hot-reload watcher runs in background
+  watch       load plugins and run ONLY the hot-reload watcher (no channel)
   telegram    run the telegram channel (deferred plugin; no-op until present)
 """
 from __future__ import annotations
@@ -51,6 +52,27 @@ def bootstrap() -> None:
     if kernel.manager._load_errors:
         for name, err in kernel.manager._load_errors.items():
             click.echo(f"[jarvis] plugin '{name}' error: {err}", err=True)
+    kernel.start_hot_reload_watcher()
+    click.echo("[jarvis] hot-reload watcher started (edits reload without restart)")
+
+
+@cli.command()
+def watch() -> None:
+    """Load plugins and run only the hot-reload watcher (no channel)."""
+    kernel = _make_kernel()
+    _load_with_sources(kernel)
+    loaded = sorted(kernel.manager.plugins.keys())
+    click.echo(f"[jarvis] loaded plugins: {loaded}")
+    kernel.start_hot_reload_watcher()
+    click.echo("[jarvis] hot-reload watcher running. Press Ctrl-C to stop.")
+    try:
+        import time
+
+        while True:
+            time.sleep(1)
+    except (KeyboardInterrupt, EOFError):
+        kernel.stop_hot_reload_watcher()
+        click.echo("\n[jarvis] watcher stopped.")
 
 
 @cli.command()
@@ -70,6 +92,7 @@ def chat() -> None:
     """Run the terminal REPL channel."""
     kernel = _make_kernel()
     _load_with_sources(kernel)
+    kernel.start_hot_reload_watcher()
     channel = None
     for svc in kernel._channels:
         if getattr(svc, "kind", "") == "terminal":

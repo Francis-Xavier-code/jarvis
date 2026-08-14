@@ -17,7 +17,7 @@ jarvis chat
 ```
 JARVIS (terminal channel). Type 'exit' to quit.
 you> hello jarvis
-jarvis> [echo] hello jarvis
+jarvis> I'm JARVIS, your microkernel assistant — ask me anything, or call a tool.
 you> exit
 ```
 

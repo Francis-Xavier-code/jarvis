@@ -52,9 +52,9 @@ def kernel(tmp_path: Path) -> Kernel:
         "    def snapshot(self): return {'model':'stub'}\n",
     )
 
-    # provider-echo (stub that routes to a tool on the word 'tool')
+    # provider-stub (test double that routes to a tool on the word 'tool')
     _write_plugin(
-        plugins, "provider-echo", "provider",
+        plugins, "provider-stub", "provider",
         "from jarvis.types import KernelApi, ChatChunk, ToolCall\n"
         "def setup(kernel: KernelApi):\n"
         "    kernel.service('provider', _P())\n"
@@ -108,7 +108,7 @@ def kernel(tmp_path: Path) -> Kernel:
 
 def test_plugins_loaded(kernel: Kernel) -> None:
     assert set(kernel.manager.plugins.keys()) == {
-        "config-core", "provider-echo", "memory-jsonl"
+        "config-core", "provider-stub", "memory-jsonl"
     }
 
 
@@ -131,8 +131,8 @@ def test_memory_persists(kernel: Kernel) -> None:
 
 
 def test_hot_reload_on_file_change(kernel: Kernel) -> None:
-    # edit provider-echo's plugin.py -> signature changes -> reload
-    plugin_dir = kernel.manager.plugins["provider-echo"].path
+    # edit provider-stub's plugin.py -> signature changes -> reload
+    plugin_dir = kernel.manager.plugins["provider-stub"].path
     py = plugin_dir / "plugin.py"
     original = py.read_text()
     py.write_text(original + "\n# touched for hot reload\n")
@@ -140,6 +140,6 @@ def test_hot_reload_on_file_change(kernel: Kernel) -> None:
     import os
     os.utime(py, None)
     reloaded = kernel.run_hot_reload_check()
-    assert "provider-echo" in reloaded
+    assert "provider-stub" in reloaded
     # tool table still intact after reload
     assert "demo.ping" in kernel._tools

@@ -21,9 +21,12 @@ because each turn uses a snapshot of the tool table.
 jarvis/            # the microkernel (types, plugin manager, kernel, cli)
 plugins/           # every capability lives here as a plain subdirectory
   config-core/     # config is a plugin (holds config.toml, exposes get/watch)
-  provider-echo/   # STUB provider (no real LLM) — proves the full chain
+  provider-openai/ # real LLM brain (OpenAI-compatible; default = opencodego)
   memory-jsonl/    # per-session conversation history (JSONL)
   channel-terminal/# terminal REPL channel
+  jarvis-install/  # the pull capability, exposed as a plugin
+  jarvis-homeassistant/ # EXAMPLE: HA wrapper proving "clone -> usable plugin"
+  plugin-self/     # self-awareness (whoami / capabilities / version)
 ```
 
 ## Run
