@@ -223,12 +223,16 @@ class OpenAIProvider:
         """Parse a Server-Sent-Events response, yielding chunks as they arrive."""
         tool_acc: dict[int, dict] = {}
         usage = None
+        got_data = False
+        saw_done = False
         for raw in resp.iter_lines(decode_unicode=True):
             if not raw or not raw.startswith("data:"):
                 continue
             data = raw[5:].strip()
             if data == "[DONE]":
+                saw_done = True
                 break
+            got_data = True
             try:
                 event = json.loads(data)
             except Exception:  # noqa: BLE001
@@ -268,6 +272,15 @@ class OpenAIProvider:
                     arguments=args,
                 )
             )
+        if got_data and not saw_done:
+            # The upstream closed the stream without the [DONE]
+            # terminator - the reply is likely truncated. Say so,
+            # and emit NO done chunk so the kernel cache never
+            # stores a partial response.
+            yield ChatChunk(
+                text="\n[jarvis] stream ended without [DONE] - reply may be truncated"
+            )
+            return
         done_chunk = ChatChunk(done=True)
         if usage and hasattr(done_chunk, "usage"):
             done_chunk.usage = usage

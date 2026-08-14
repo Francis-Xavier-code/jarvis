@@ -49,6 +49,106 @@ def test_app_constructs_with_textual(kernel: Kernel) -> None:
     assert app is not None
     assert app._kernel is kernel
 
+
+def test_app_mounts_headless(kernel: Kernel) -> None:
+    """Mount the real app: on_mount builds the brand markup, pushes the splash
+    screen and registers confirm handling.
+
+    Regression: the brand tagline wrapped _DIM in an extra bracket pair
+    ("[[dim]]"), which Rich parses as a literal "[" - the trailing "[/]" then
+    had no open tag and startup raised MarkupError. Mounting the app headlessly
+    exercises exactly that path (on_mount -> Static.update -> visualize).
+    """
+    import asyncio
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    if not mod._TEXTUAL_OK:
+        pytest.skip("textual not installed")
+
+    async def _mount() -> None:
+        app = mod._JarvisApp(kernel)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.2)
+            brand = app.query_one("#brand", mod.Static)
+            content = brand.render()
+            # big-font logo rows + tagline are present, and the tagline carries
+            # the dim style (i.e. the markup parsed, it was not literal [[dim]])
+            assert "microkernel · everything is a plugin" in content.plain
+            assert "dim" in str(content.spans)
+            app.exit()
+
+    asyncio.run(_mount())
+
+
+def test_tool_label_truncates_long_args(kernel: Kernel) -> None:
+    """Tool labels never exceed one line: per-arg and overall caps."""
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    label = mod._tool_label("bash.execute", {"command": "echo " + "x" * 300, "cwd": ""})
+    assert len(label) <= 110
+    assert "..." in label  # the truncated arg value carries the ellipsis
+    short = mod._tool_label("web.search", {"query": "hi"})
+    assert short == "WebSearch(query='hi')"
+
+
+def test_streamed_partial_line_renders_live(kernel: Kernel) -> None:
+    """Streamed text is visible before a newline arrives (regression: the
+    in-flight line used to be hidden until the turn ended)."""
+    import asyncio
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    if not mod._TEXTUAL_OK:
+        pytest.skip("textual not installed")
+
+    async def _run() -> None:
+        app = mod._JarvisApp(kernel)
+        async with app.run_test() as pilot:
+            app._stream_md("hel")
+            app._stream_md("lo wo")
+            await pilot.pause(0.1)
+            chat = app.query_one("#chat")
+            plains = [w.render().plain for w in chat.query(mod.Static)]
+            assert any("hello wo" in p for p in plains), plains
+            app.exit()
+
+    asyncio.run(_run())
+
+
+def test_tool_messages_display_via_thread_bridge(kernel: Kernel) -> None:
+    """Tool call/result callbacks arrive from the worker thread and must
+    render through the call_from_thread bridge (regression: direct DOM
+    mutation from the worker thread could drop/glitch tool messages)."""
+    import asyncio
+    import sys
+    import threading
+
+    from jarvis.types import ToolCall
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    if not mod._TEXTUAL_OK:
+        pytest.skip("textual not installed")
+
+    async def _run() -> None:
+        app = mod._JarvisApp(kernel)
+        async with app.run_test() as pilot:
+            call = ToolCall(name="bash.execute", arguments={"command": "echo " + "y" * 300})
+
+            def poke() -> None:
+                app._on_tool(call)
+                app._on_tool_done(call, "ok\n" + "z" * 200, 1.5)
+
+            threading.Thread(target=poke).start()
+            await pilot.pause(0.4)
+            chat = app.query_one("#chat")
+            plains = [w.render().plain for w in chat.query(mod.Static)]
+            assert any("Bash" in p and "->" in p and "ok" in p for p in plains), plains
+            app.exit()
+
+    asyncio.run(_run())
+
 def test_spinner_helpers_present(kernel: Kernel) -> None:
     import sys
 

@@ -1,45 +1,78 @@
-# JARVIS
+<div align="center">
 
-> A microkernel AI assistant where **everything is a plugin**.
+<img src="assess/jarvis-logo.png" alt="JARVIS logo" width="420">
 
-> 中文文档: [README.zh.md](README.zh.md)
+**A microkernel AI assistant where *everything* is a plugin.**
 
-JARVIS is built on one rule: the kernel does almost nothing. LLM providers,
-memory backends, conversation channels (terminal / telegram / web), **and even
-configuration** are all *plugins*. Each plugin is a plain directory under
-`plugins/` containing a `plugin.toml` manifest and a `plugin.py` entrypoint.
+`jarvis` · Python ≥ 3.11 · hot-reload · self-modifying
 
-A plugin registers tools and services against the kernel. The kernel aggregates
-them into a single tool table and runs the agent loop. Plugins support
-**hot-reload**: change a plugin's files (or its config) and the kernel tears it
-down and reloads it — no process restart, and in-flight conversations are safe
-because each turn uses a snapshot of the tool table.
+[中文文档](README.zh.md) &nbsp;·&nbsp; [Docs](docs/) &nbsp;·&nbsp; [Changelog](CHANGELOG.md)
 
-## Layout
+</div>
+
+---
+
+> **One rule: the kernel does almost nothing.**
+> LLM providers, memory backends, conversation channels, **even configuration** — all plugins.
+
+JARVIS is built on that single rule. Each plugin is a plain directory under
+`plugins/` with a `plugin.toml` manifest and a `plugin.py` entrypoint. Plugins
+register **tools** and **services** against the kernel, which aggregates them
+into one tool table and runs the agent loop.
+
+## ✨ Features
+
+- 🧩 **Everything is a plugin** — providers, memory, channels, config, tools
+- 🔥 **Hot-reload** — edit a plugin (or its config) and it reloads live; in-flight turns are safe via tool-table snapshots
+- 🧠 **Cross-session memory** — `mem.store` / `mem.recall` facts that survive restarts
+- 🖥️ **Two channels** — a readline REPL (`jarvis chat`) and a full-screen TUI (`jarvis tui`)
+- 📝 **Markdown-rendering TUI** — bold / lists / code blocks / links, plus an animated JARVIS splash
+- 🪄 **Self-modifying** — JARVIS can edit its own plugin files, hot-load new ones, and rewire itself next turn
+- 🌐 **Web tools** — search & fetch built in
+- 🏠 **Home Assistant** — light control demo plugin (`clone → usable plugin` in one step)
+
+## 🧬 Architecture
 
 ```
-jarvis/            # the microkernel (types, plugin manager, kernel, cli)
-plugins/           # every capability lives here as a plain subdirectory
-  config-core/     # config is a plugin (holds config.toml, exposes get/watch)
-  provider-openai/ # real LLM brain (OpenAI-compatible; default = opencodego)
-  memory-jsonl/    # per-session conversation history (JSONL)
-  channel-terminal/# terminal REPL channel
-  jarvis-install/  # the pull capability, exposed as a plugin
-  jarvis-homeassistant/ # EXAMPLE: HA wrapper proving "clone -> usable plugin"
-  plugin-self/     # self-awareness (whoami / capabilities / version)
+                  ┌──────────────────────────────────────────┐
+                  │              JARVIS kernel               │
+                  │  tool table · agent loop · plugin mgr    │
+                  │  confirm gate · turn snapshots           │
+                  └───▲───────────▲───────────▲───────────▲──┘
+                      │ register  │ chat()    │ reload    │ get/watch
+        ┌─────────────┴──┐   ┌────┴──────┐   ┌┴──────────┐ ┌┴─────────┐
+        │  tool plugins  │   │ providers │   │ channels  │ │  config  │
+        │ fs·web·hass·…  │   │  openai   │   │ terminal  │ │  core    │
+        └────────────────┘   └───────────┘   │ tui       │ └──────────┘
+                                             └───────────┘
 ```
 
-## Run
+## 📦 Layout
+
+```
+jarvis/             # the microkernel (types · plugin manager · kernel · CLI)
+plugins/            # every capability lives here as a plain subdirectory
+sessions/           # per-conversation history (JSONL) — episodic memory
+memory/             # cross-session facts — long-term memory
+config.toml         # configuration (itself a plugin's data)
+assess/             # design assets (logo · banners)
+tests/              # pytest suite
+```
+
+## 🚀 Quickstart
 
 ```bash
-uv venv && uv pip install -e .
-uv run jarvis chat        # terminal REPL
-uv run jarvis bootstrap   # list loaded plugins + any load errors
+uv venv && uv pip install -e ".[ui]"   # [ui] pulls textual for the TUI
+uv run jarvis tui                      # full-screen TUI
+uv run jarvis chat                     # terminal REPL
+uv run jarvis bootstrap                # list loaded plugins + load errors
+uv run jarvis doctor                   # environment checks
+uv run jarvis install <git-url>        # pull a plugin repo, hot-load it
 ```
 
-## Write a plugin
+## 🔌 Write a plugin
 
-Create `plugins/my-thing/plugin.toml`:
+`plugins/my-thing/plugin.toml`:
 
 ```toml
 [plugin]
@@ -50,7 +83,7 @@ entry = "plugin.py"
 hot_reload = true
 ```
 
-And `plugins/my-thing/plugin.py`:
+`plugins/my-thing/plugin.py`:
 
 ```python
 from jarvis.types import KernelApi
@@ -61,12 +94,39 @@ def setup(kernel: KernelApi) -> None:
         return f"hello, {name}"
 ```
 
-Drop the folder in `plugins/` and it is loaded on next start (or hot-reloaded
-the moment you edit it). No kernel changes required.
+Drop the folder in `plugins/` — it loads on next start, or hot-reloads the
+moment you edit it. **No kernel changes required.**
 
-## Roadmap (post-mechanism)
+## 🗂️ Plugin inventory
 
-- Real `provider-*` plugins (OpenAI-compatible endpoints)
-- `channel-telegram` (long-poll bot) and `channel-web`
-- `tool-homeassistant` demo plugin
-- Optional: promote selected plugins to independent git repos with auto-pull
+| plugin | kind | what it does |
+|---|---|---|
+| `provider-openai` | provider | the LLM brain (OpenAI-compatible, streaming SSE + tool calls) |
+| `memory-jsonl` | memory | session history + cross-session facts (JSONL) |
+| `config-core` | config | configuration as a plugin (`get`/`watch`, hot-reload on mtime) |
+| `channel-terminal` | channel | readline REPL with paste detection & multi-line input |
+| `channel-tui` | channel | full-screen textual TUI: md rendering, confirm modals, tool feedback, animated splash |
+| `web-tools` | tool | web search + fetch |
+| `agent-tools` | tool | agent identity + file / shell tools |
+| `cache-core` | tool | response caching |
+| `log-stats` | tool | usage & log statistics |
+| `personality` | tool | personality layer |
+| `plugin-self` | tool | self-awareness (`whoami` / `capabilities` / `version` / `config`) |
+| `jarvis-install` | tool | pull plugins from git repos at runtime |
+| `jarvis-homeassistant` | tool | Home Assistant lights (demo: clone → usable plugin) |
+
+## 🤖 "Is this repo your body?"
+
+**Basically, yes.** The kernel is the skeleton, `plugins/` are the organs,
+`sessions/` is episodic memory, `memory/` is long-term memory, `config.toml`
+is the settings. A running process is JARVIS *awake*; this repo is JARVIS
+*itself* — versioned in git like a genome, and editable while running.
+
+## 🗺️ Roadmap
+
+- `channel-telegram` / `channel-web` — remote channels
+- `/model` switching & `/resume` sessions in the TUI
+- Diff views for file edits
+- Promote selected plugins to independent repos with auto-pull
+
+<!-- --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 03:33:28 --- -->

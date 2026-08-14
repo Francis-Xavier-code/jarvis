@@ -186,7 +186,11 @@ def chat(self, req: ChatRequest):
 - `ChatRequest` carries `messages`, `tools` (the snapshot), `model`.
 - A chunk may carry `text` and/or `tool_call`. The kernel collects text, and any
   `tool_call` is routed to the registered tool, result fed back, repeated until
-  a turn yields no tool calls (max 4 rounds).
+  a turn yields no tool calls. The tool-call budget is 4 rounds by default
+  (configurable via `[agent] max_tool_rounds`); after the budget the kernel runs
+  ONE wind-down request so a multi-step task can still produce its final answer,
+  and if the model is still calling tools it streams/persists an explicit
+  `tool-round limit reached` note instead of ending mid-task.
 - **tool_call_id binding:** set `ToolCall.id` to the upstream id when parsing
   the model's `tool_calls`. The kernel stores it on the assistant message, and
   the provider must replay each `role:"tool"` result bound to the id of the

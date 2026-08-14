@@ -1,38 +1,77 @@
-# JARVIS
+<div align="center">
 
-> 一个微内核 AI 助手,核心理念是**一切皆插件**。
+<img src="assess/jarvis-logo.png" alt="JARVIS logo" width="420">
 
-> English docs: [README.md](README.md)
+**一个微内核 AI 助手,核心理念是*一切皆插件*。**
 
-JARVIS 只有一条原则:内核几乎什么都不做。LLM provider、记忆后端、对话通道(终端 / telegram / web),**甚至配置本身**,全都是*插件*。每个插件是 `plugins/` 下的一个普通目录,里面包含一个 `plugin.toml` 清单和一个 `plugin.py` 入口。
+`jarvis` · Python ≥ 3.11 · 热重载 · 自我修改
 
-插件向内核注册工具(tools)和服务(services)。内核把它们聚合成一张统一的工具表并运行 agent 循环。插件支持**热重启**:改动插件的文件(或其配置),内核会把它卸载(teardown)再重新加载——不需要重启进程,而且正在进行的对话是安全的,因为每一轮对话都使用工具表的快照。
+[English](README.md) &nbsp;·&nbsp; [文档](docs/) &nbsp;·&nbsp; [变更日志](CHANGELOG.md)
 
-## 目录结构
+</div>
+
+---
+
+> **唯一的原则:内核几乎什么都不做。**
+> LLM provider、记忆后端、对话通道,**甚至配置本身**——全都是插件。
+
+JARVIS 建立在这一条原则上。每个插件是 `plugins/` 下的一个普通目录,包含
+`plugin.toml` 清单和 `plugin.py` 入口。插件向内核注册**工具(tools)**和
+**服务(services)**,内核把它们聚合成一张统一的工具表,并运行 agent 循环。
+
+## ✨ 特性
+
+- 🧩 **一切皆插件** — provider、记忆、通道、配置、工具
+- 🔥 **热重载** — 编辑插件(或其配置)即刻生效;进行中的对话通过工具表快照保持安全
+- 🧠 **跨会话记忆** — `mem.store` / `mem.recall` 记住跨重启的事实
+- 🖥️ **双通道** — readline REPL(`jarvis chat`)与全屏 TUI(`jarvis tui`)
+- 📝 **Markdown 渲染 TUI** — 粗体 / 列表 / 代码块 / 链接,外加动画 JARVIS 启动页
+- 🪄 **自我修改** — JARVIS 可以编辑自己的插件文件、热加载新插件,并在下一轮对话中重新接线自己
+- 🌐 **联网工具** — 内置搜索与网页抓取
+- 🏠 **Home Assistant** — 灯光控制示例插件(克隆 → 可用插件,一步到位)
+
+## 🧬 架构
 
 ```
-jarvis/            # 微内核(types、插件管理器、kernel、cli)
-plugins/           # 所有能力都以普通子目录的形式放在这里
-  config-core/     # 配置即插件(持有 config.toml,暴露 get/watch)
-  provider-openai/ # 真实 LLM 大脑(OpenAI 兼容;默认 = opencodego 聚合商)
-  memory-jsonl/    # 按会话存储的对话历史(JSONL)
-  channel-terminal/# 终端 REPL 通道
-  jarvis-install/  # 拉取能力,暴露为插件
-  jarvis-homeassistant/ # 示例:证明"克隆 -> 可用插件"的 HA 包装器
-  plugin-self/     # 自我认知(whoami / capabilities / version)
+                  ┌──────────────────────────────────────────┐
+                  │              JARVIS kernel               │
+                  │  tool table · agent loop · plugin mgr    │
+                  │  confirm gate · turn snapshots           │
+                  └───▲───────────▲───────────▲───────────▲──┘
+                      │ register  │ chat()    │ reload    │ get/watch
+        ┌─────────────┴──┐   ┌────┴──────┐   ┌┴──────────┐ ┌┴─────────┐
+        │  tool plugins  │   │ providers │   │ channels  │ │  config  │
+        │ fs·web·hass·…  │   │  openai   │   │ terminal  │ │  core    │
+        └────────────────┘   └───────────┘   │ tui       │ └──────────┘
+                                             └───────────┘
 ```
 
-## 运行
+## 📦 目录结构
+
+```
+jarvis/             # 微内核(types · 插件管理器 · kernel · CLI)
+plugins/            # 所有能力都以普通子目录的形式存在
+sessions/           # 按会话存储的历史(JSONL)—— 情景记忆
+memory/             # 跨会话事实 —— 长期记忆
+config.toml         # 配置(本身就是一个插件的数据)
+assess/             # 设计资源(logo · banner)
+tests/              # pytest 测试套件
+```
+
+## 🚀 快速开始
 
 ```bash
-uv venv && uv pip install -e .
-uv run jarvis chat        # 终端 REPL
-uv run jarvis bootstrap   # 列出已加载的插件 + 任何加载错误
+uv venv && uv pip install -e ".[ui]"   # [ui] 会拉取 TUI 所需的 textual
+uv run jarvis tui                      # 全屏 TUI
+uv run jarvis chat                     # 终端 REPL
+uv run jarvis bootstrap                # 列出已加载插件 + 加载错误
+uv run jarvis doctor                   # 环境体检
+uv run jarvis install <git-url>        # 拉取插件仓库并热加载
 ```
 
-## 写一个插件
+## 🔌 写一个插件
 
-创建 `plugins/my-thing/plugin.toml`:
+`plugins/my-thing/plugin.toml`:
 
 ```toml
 [plugin]
@@ -43,7 +82,7 @@ entry = "plugin.py"
 hot_reload = true
 ```
 
-以及 `plugins/my-thing/plugin.py`:
+`plugins/my-thing/plugin.py`:
 
 ```python
 from jarvis.types import KernelApi
@@ -54,11 +93,37 @@ def setup(kernel: KernelApi) -> None:
         return f"hello, {name}"
 ```
 
-把文件夹放进 `plugins/`,下次启动时就会被加载(或者你一编辑文件就立即热重启)。不需要改内核。
+把文件夹丢进 `plugins/` —— 下次启动即加载,或在你编辑它的瞬间热重载。**无需改动内核。**
 
-## 路线图(机制完成之后)
+## 🗂️ 插件清单
 
-- 真实的 `provider-*` 插件(兼容 OpenAI 的端点)
-- `channel-telegram`(长轮询 bot)与 `channel-web`
-- `tool-homeassistant` 示例插件
-- 可选:把部分插件提升为独立的 git 仓库并支持自动拉取
+| 插件 | 类型 | 作用 |
+|---|---|---|
+| `provider-openai` | provider | LLM 大脑(OpenAI 兼容,SSE 流式 + 工具调用) |
+| `memory-jsonl` | memory | 会话历史 + 跨会话事实(JSONL) |
+| `config-core` | config | 配置即插件(`get`/`watch`,mtime 热重载) |
+| `channel-terminal` | channel | readline REPL,支持粘贴检测与多行输入 |
+| `channel-tui` | channel | 全屏 textual TUI:md 渲染、确认提示、工具反馈、动画启动页 |
+| `web-tools` | tool | 网络搜索 + 网页抓取 |
+| `agent-tools` | tool | agent 身份 + 文件 / shell 工具 |
+| `cache-core` | tool | 响应缓存 |
+| `log-stats` | tool | 用量与日志统计 |
+| `personality` | tool | 人格层 |
+| `plugin-self` | tool | 自我认知(`whoami` / `capabilities` / `version` / `config`) |
+| `jarvis-install` | tool | 运行时从 git 仓库拉取插件 |
+| `jarvis-homeassistant` | tool | Home Assistant 灯光(示例:克隆 → 可用插件) |
+
+## 🤖 "这个仓库就是你的身体?"
+
+**基本如此。** 内核是骨架,`plugins/` 是器官,`sessions/` 是情景记忆,
+`memory/` 是长期记忆,`config.toml` 是设置。运行中的进程是 JARVIS *清醒*;
+这个仓库就是 JARVIS *本身* —— 像基因组一样用 git 做版本管理,而且可以运行中修改。
+
+## 🗺️ 路线图
+
+- `channel-telegram` / `channel-web` —— 远程通道
+- TUI 里的 `/model` 切换与 `/resume` 会话
+- 文件编辑的 diff 视图
+- 把部分插件提升为独立仓库并支持自动拉取
+
+<!-- --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 03:33:28 --- -->

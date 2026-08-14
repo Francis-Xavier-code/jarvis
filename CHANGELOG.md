@@ -7,6 +7,13 @@ plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
 ## [Unreleased]
 
 ### Added
+- **agent-loop wind-down**: after the tool-round budget ([agent] max_tool_rounds,
+  default 4) the kernel runs one final request so multi-step tasks still get
+  their answer; the wind-down is now text-only (no tools advertised), so a
+  final reply is guaranteed — the explicit "tool-round limit reached" note
+  only streams/persists if a provider returns tool calls anyway
+- **provider truncation detection**: SSE streams that end without [DONE] are
+  flagged as possibly truncated and are never cached
 - **auto-approve**: `auto_approve = true` in config.toml approves
   assistant-initiated actions (bash commands, out-of-root file writes, plugin
   installs) without interactive y/N prompts — for trusted/headless setups;
@@ -15,6 +22,8 @@ plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
   the gate live from the TUI and persists it to config.toml (config-core now
   supports writing keys back to the file, comments preserved); startup banner
   shows the current auto-approve state
+- **docs**: README banner logo (assess/jarvis-logo.png) + refreshed plugin
+  inventory; README.zh.md brought to parity with the English version
 
 ## [0.2.0] - 2026-08-15 — agent-ready
 
@@ -90,3 +99,5 @@ plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
 - plugin spec v1.0 (frozen decisions: str-only tools, sync provider, no
   auto-deps, free-form config) with bilingual docs and per-plugin READMEs
 - CI (uv + pytest) and .hermes/.jarvis-cloned gitignores
+
+<!-- --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 03:39:48 --- -->

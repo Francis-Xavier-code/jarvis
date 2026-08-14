@@ -402,7 +402,17 @@ class Kernel:
                     pass
             return chunks, False
 
-        MAX_ROUNDS = 4
+        # Tool-call round budget: one provider request per round. After the
+        # budget the loop runs ONE text-only wind-down request (no tools are
+        # advertised) so a multi-step task ALWAYS ends with a real final
+        # answer, never a silent cutoff (config: [agent] max_tool_rounds).
+        MAX_ROUNDS = 4  # default tool-call rounds per turn
+        agent_cfg = self._config.get("agent", {})
+        tool_rounds = (
+            max(1, int(agent_cfg.get("max_tool_rounds", MAX_ROUNDS)))
+            if isinstance(agent_cfg, dict)
+            else MAX_ROUNDS
+        )
         reply_text = ""
         reasoning_text = ""
         logger_svc = self._services.get("logger")
@@ -412,13 +422,20 @@ class Kernel:
         total_tool_calls = 0
         any_cache_hit = False
         last_model = ""
-        for _ in range(MAX_ROUNDS):
+        last_round_tools = False
+        for _ in range(tool_rounds + 1):  # +1 = wind-down final-answer request
             rounds += 1
+            last_round_tools = False
             snapshot = self.tools_snapshot()
             tool_table = {s.name: s for s in snapshot}
+            # Wind-down: advertise NO tools so the model cannot call another
+            # tool and must produce the final answer text. The limit note
+            # below now only fires for a provider that returns tool calls
+            # anyway (broken/stub) - never a silent mid-task cutoff.
+            wind_down = rounds > tool_rounds
             req = ChatRequest(
                 messages=_context_messages(),
-                tools=snapshot,
+                tools=[] if wind_down else snapshot,
                 model=self._config.get("model", ""),
             )
             last_model = req.model
@@ -452,6 +469,7 @@ class Kernel:
             total_tool_calls += len(pending_calls)
             if not pending_calls:
                 break
+            last_round_tools = True
             # Store the assistant turn WITH its tool_calls so the history can be
             # replayed verbatim for providers that require tool_call_id binding.
             # Prefer the provider-assigned id (threaded through ToolCall.id).
@@ -485,6 +503,21 @@ class Kernel:
                     except Exception:  # noqa: BLE001
                         pass
                 history.append(ChatMessage(role="tool", content=result, name=call.name))
+
+        # Wind-down note: the +1 request above ran because the previous round
+        # still called tools, and it called tools again - the task is now
+        # genuinely capped. Say so explicitly instead of ending mid-task.
+        if last_round_tools:
+            note = (
+                f"\n\n[note] tool-round limit reached ({tool_rounds}); the task may be "
+                "incomplete - ask me to continue"
+            )
+            reply_text = (reply_text + note).strip()
+            if on_chunk is not None:
+                try:
+                    on_chunk(ChatChunk(text=note))
+                except Exception:  # noqa: BLE001
+                    pass
 
         # Persist the final assistant reply too: text-only rounds (no tool
         # calls) never entered the loop's history.append above, so without

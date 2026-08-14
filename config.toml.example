@@ -37,6 +37,12 @@ max_entries = 64      # LRU cap
 [memory]
 max_rounds = 30       # keep the last N user rounds in the request (full history still persisted)
 
+# ---- agent loop: tool-call budget ----
+[agent]
+max_tool_rounds = 4   # tool-call rounds per turn; after this the kernel runs one
+                      # wind-down request so multi-step tasks still get their final
+                      # answer, then reports the limit if the model keeps calling tools
+
 # ---- personality: the assistant's persona (injected into every turn) ----
 [personality]
 name = "JARVIS"

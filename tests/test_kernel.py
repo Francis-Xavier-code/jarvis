@@ -348,6 +348,85 @@ def test_secrets_redacted_in_reply(kernel: Kernel) -> None:
     assert "***" in out
 
 
+_ALWAYS_TOOL_STUB = (
+    "from jarvis.types import KernelApi, ChatChunk, ToolCall\n"
+    "N = 0\n"
+    "def setup(kernel: KernelApi):\n"
+    "    kernel.service('provider', _P())\n"
+    "    @kernel.tool('demo.ping', 'ping', {})\n"
+    "    def ping(): return 'pong'\n"
+    "class _P:\n"
+    "    kind='provider'\n"
+    "    def chat(self, req):\n"
+    "        global N\n"
+    "        N += 1\n"
+    "        yield ChatChunk(tool_call=ToolCall(name='demo.ping', arguments={}))\n"
+    "        yield ChatChunk(done=True)\n"
+)
+
+
+def _tool_round_kernel(tmp_path: Path, provider_src: str) -> Kernel:
+    _write_plugin(tmp_path / "plugins", "provider-stub", "provider", provider_src)
+    k = Kernel(plugins_dir=str(tmp_path / "plugins"), data_dir=str(tmp_path / "data"))
+    k.load()
+    return k
+
+
+def test_tool_round_winddown_produces_final_answer(tmp_path: Path) -> None:
+    """Regression: a task needing more than 4 tool rounds used to end
+    mid-flight - the last round's tools ran but the model never got to
+    answer. The wind-down request now produces the final answer."""
+    stub = (
+        "from jarvis.types import KernelApi, ChatChunk, ToolCall\n"
+        "N = 0\n"
+        "def setup(kernel: KernelApi):\n"
+        "    kernel.service('provider', _P())\n"
+        "    @kernel.tool('demo.ping', 'ping', {})\n"
+        "    def ping(): return 'pong'\n"
+        "class _P:\n"
+        "    kind='provider'\n"
+        "    def chat(self, req):\n"
+        "        global N\n"
+        "        N += 1\n"
+        "        if N < 5:\n"
+        "            yield ChatChunk(tool_call=ToolCall(name='demo.ping', arguments={}))\n"
+        "        else:\n"
+        "            yield ChatChunk(text='final answer')\n"
+        "        yield ChatChunk(done=True)\n"
+    )
+    k = _tool_round_kernel(tmp_path, stub)
+    out = k.chat("s1", "work")
+    assert out == "final answer"
+    import sys
+
+    assert sys.modules["jarvis_plugin_provider_stub"].N == 5  # 4 rounds + wind-down
+
+
+def test_tool_round_winddown_note_when_still_calling(tmp_path: Path) -> None:
+    """A provider that never stops calling tools: after 4 rounds + 1 wind-down
+    the kernel streams and persists an explicit limit note - never a silent
+    cut mid-task."""
+    k = _tool_round_kernel(tmp_path, _ALWAYS_TOOL_STUB)
+    notes: list[str] = []
+    out = k.chat("s1", "work", on_chunk=lambda c: notes.append(c.text or ""))
+    assert "tool-round limit reached (4)" in out
+    assert any("tool-round limit" in n for n in notes)  # streamed to channels
+    import sys
+
+    assert sys.modules["jarvis_plugin_provider_stub"].N == 5
+
+
+def test_tool_round_cap_configurable(tmp_path: Path) -> None:
+    """[agent] max_tool_rounds configures the budget (and the wind-down)."""
+    k = _tool_round_kernel(tmp_path, _ALWAYS_TOOL_STUB)
+    k.set_config({"agent": {"max_tool_rounds": 2}})
+    out = k.chat("s1", "work")
+    assert "tool-round limit reached (2)" in out
+    import sys
+
+    assert sys.modules["jarvis_plugin_provider_stub"].N == 3  # 2 rounds + wind-down
+
+
 def test_credential_shapes_redacted_without_config(kernel: Kernel) -> None:
     """Known credential shapes are masked even when not in the config."""
     class _Leaky:

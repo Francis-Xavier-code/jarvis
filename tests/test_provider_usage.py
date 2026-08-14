@@ -136,3 +136,22 @@ def test_provider_nonstream_fallback(monkeypatch) -> None:
     chunks = list(prov.chat(req))
     assert "".join(c.text or "" for c in chunks) == "hi"
     assert chunks[-1].usage == {"prompt_tokens": 2, "completion_tokens": 1}
+
+
+def test_provider_warns_on_truncated_stream(monkeypatch) -> None:
+    """An SSE stream that ends without [DONE] (upstream cut) is flagged as
+    possibly truncated, and no done chunk is emitted so the kernel cache never
+    stores a partial response."""
+    mod = _load_provider()
+    _fake_requests(monkeypatch, mod, [
+        'data: {"choices":[{"delta":{"content":"part"}}]}',
+        'data: {"choices":[{"delta":{"content":"ial"}}]}',
+        # NOTE: no "data: [DONE]" - the connection just ended
+    ])
+    prov = mod.OpenAIProvider(_FakeKernel())
+    req = ChatRequest(messages=[ChatMessage(role="user", content="hi")], tools=[], model="m")
+    chunks = list(prov.chat(req))
+    text = "".join(c.text or "" for c in chunks)
+    assert "partial" in text
+    assert "without [DONE]" in text
+    assert chunks[-1].done is False  # truncated -> never cached

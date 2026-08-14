@@ -5,6 +5,32 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.8] - 2026-08-15
+
+### Added
+- live rendering of the in-flight (unterminated) streamed line - text is visible the moment a chunk arrives, not only after a newline (by JARVIS <jarvis@jarvis.local>)
+
+### Changed
+- feat(tui): main-view JARVIS logo now runs the same perpetual shimmer sweep as the splash (0.1s interval, skipped when hidden on narrow terminals) (by JARVIS <jarvis@jarvis.local>)
+- tool call/result callbacks now mutate the UI exclusively through the app-thread bridge (call_from_thread) - no more worker-thread DOM races that could drop tool messages (by JARVIS <jarvis@jarvis.local>)
+- status spinner re-arms ("thinking...") after every tool result, so multi-round turns never look stalled between tools (by JARVIS <jarvis@jarvis.local>)
+- tool labels truncate per-arg (48ch) and overall (110ch); result summary capped at 60ch - long bash commands no longer wrap the whole panel (by JARVIS <jarvis@jarvis.local>)
+
+## [0.6.7] - 2026-08-15
+
+### Fixed
+- _md_inline docstring raw-string (invalid escape \[ -> DeprecationWarning noise) (by JARVIS <jarvis@jarvis.local>)
+
+## [0.6.6] - 2026-08-15
+
+### Fixed
+- fix brand tagline markup (double-bracket [[dim]] -> [dim]) - MarkupError on startup (by JARVIS <jarvis@jarvis.local>)
+
+## [0.6.5] - 2026-08-15
+
+### Changed
+- feat(tui): replace pixel whale with JARVIS brand — big-font logo + tagline in main view, splash shows shimmering JARVIS title + "microkernel · everything is a plugin" (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.4] - 2026-08-15
 
 ### Fixed

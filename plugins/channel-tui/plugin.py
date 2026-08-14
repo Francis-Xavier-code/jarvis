@@ -22,7 +22,7 @@ import time
 from jarvis.types import KernelApi
 
 from . import ui
-from .ui import GLYPHS, FRAMES, render_big, render_whale, shimmer_line
+from .ui import render_big, shimmer_line
 
 # ---- soft dependency ----
 try:
@@ -60,7 +60,7 @@ _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
 def _md_inline(text: str) -> str:
-    """Convert inline markdown markers to Rich markup tags.
+    r"""Convert inline markdown markers to Rich markup tags.
 
     Literal square brackets in the source are escaped to `\[` first (Rich
     parses `[...]` as tags), so text like `arr[0]` or `[1, 2]` survives.
@@ -124,6 +124,31 @@ _KNOWN_TOOLS = {
 
 def _display_name(name: str) -> str:
     return _KNOWN_TOOLS.get(name, name.split(".")[-1].title() or name)
+
+
+def _short(value: str, limit: int = 48) -> str:
+    """Truncate a rendered value so tool labels stay on one line."""
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def _tool_label(
+    name: str,
+    arguments: dict,
+    max_args: int = 4,
+    arg_limit: int = 48,
+    max_len: int = 110,
+) -> str:
+    """One-line tool label: display name + first args, values truncated."""
+    args = ", ".join(
+        f"{k}={_short(_esc(repr(v)), arg_limit)}"
+        for k, v in list(arguments.items())[:max_args]
+    )
+    label = f"{_display_name(name)}({args})"
+    if len(label) > max_len:
+        label = label[: max_len - 3] + "..."
+    return label
 
 
 def _esc(text: str) -> str:
@@ -230,12 +255,12 @@ class _JarvisApp(App):
     #in:focus {
         border: hkey $accent;
     }
-    #whale {
+    #brand {
         height: 13;
         margin: 0 1;
         content-align: center top;
     }
-    #whale.hidden {
+    #brand.hidden {
         display: none;
     }
     Header { background: $surface; color: $text; }
@@ -276,10 +301,20 @@ class _JarvisApp(App):
         self._current_tool_label = ""
         self._tool_spinner_idx = 0
         self._tool_spinner_timer = None
+        # the thread that owns the app: worker threads must hop over via
+        # call_from_thread, direct calls (tests / sync callers) can run inline
+        self._ui_thread_id = threading.get_ident()
+
+    def _ui_call(self, fn, *args):
+        """Run fn on the app thread (worker-thread-safe); when already on the
+        app thread (tests / synchronous callers) run it directly."""
+        if threading.get_ident() == self._ui_thread_id:
+            return fn(*args)
+        return self.call_from_thread(fn, *args)
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
-        yield Static("", id="whale")
+        yield Static("", id="brand")
         yield Header(show_clock=True)
         yield VerticalScroll(id="chat")
         yield Static("", id="status")
@@ -293,7 +328,10 @@ class _JarvisApp(App):
         except Exception:  # noqa: BLE001 - already registered / older textual
             pass
         self._kernel.confirm_action = self._confirm_wait
-        self.query_one("#whale", Static).update("\n".join(render_whale("standard")))
+        self._brand_rows = render_big("JARVIS")
+        self._brand_step = 0
+        self._brand_timer = self.set_interval(0.1, self._brand_shimmer)
+        self._brand_shimmer()
         state = "ON" if self._kernel.auto_approve() else "OFF"
         self._log(
             f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands. "
@@ -301,6 +339,15 @@ class _JarvisApp(App):
         )
         self._focus_input()
         self.push_screen(_SplashScreen())
+
+    def _brand_shimmer(self) -> None:
+        """Perpetual shimmer sweep on the main-view JARVIS logo (like the splash)."""
+        w = self.query_one("#brand", Static)
+        if "hidden" in w.classes:
+            return  # narrow terminal: logo hidden, skip the sweep
+        rows = "\n".join(shimmer_line(row, self._brand_step) for row in self._brand_rows)
+        w.update(f"{rows}\n{_DIM}microkernel · everything is a plugin[/]")
+        self._brand_step += 1
 
     def _log(self, text: str, classes: str = "") -> None:
         """Append a plain message row (system / tool / error lines)."""
@@ -391,8 +438,8 @@ class _JarvisApp(App):
             event.stop()
 
     def on_resize(self) -> None:
-        """Hide the pixel whale on narrow terminals (dsh-TUI WHALE_MIN_COLUMNS=64)."""
-        w = self.query_one("#whale", Static)
+        """Hide the brand logo on narrow terminals (dsh-TUI WHALE_MIN_COLUMNS=64)."""
+        w = self.query_one("#brand", Static)
         w.set_class(self.size.width < 64, "hidden")
 
     def action_history_prev(self) -> None:
@@ -549,15 +596,24 @@ class _JarvisApp(App):
         lines = text.split("\n")
         self._md_part = lines.pop()
         for ln in lines:
-            self._assistant_buf.append(self._mark_first(self._md_line(ln)))
+            self._assistant_buf.append(self._md_line(ln))
         self._refresh_assistant()
 
     def _refresh_assistant(self) -> None:
-        if not self._assistant_buf:
+        """Render completed lines PLUS the live in-flight line, so streamed
+        text is visible the moment a chunk arrives (not only after a newline)."""
+        lines = list(self._assistant_buf)
+        if self._md_part:
+            # pure render of the unterminated line: no fence-state transitions
+            lines.append(_md_block(self._md_part, self._in_code))
+        if not lines:
             return
+        if not self._assistant_prefix:
+            self._assistant_prefix = True
+            lines[0] = f"{_PRIMARY}jarvis >[/] {lines[0]}"
         if self._current_assistant is None:
             self._current_assistant = self._new_message("", "assistant-msg")
-        self._update_message(self._current_assistant, "\n".join(self._assistant_buf))
+        self._update_message(self._current_assistant, "\n".join(lines))
         self._scroll_end()
 
     def _md_line(self, ln: str) -> str:
@@ -571,39 +627,38 @@ class _JarvisApp(App):
 
     def _flush_md(self) -> None:
         if self._md_part:
-            self._assistant_buf.append(self._mark_first(self._md_line(self._md_part)))
+            self._assistant_buf.append(self._md_line(self._md_part))
             self._md_part = ""
         self._in_code = False
         self._refresh_assistant()
-
-    def _mark_first(self, rendered: str) -> str:
-        """Prefix the first assistant line with a marker, then never again."""
-        if not self._assistant_prefix:
-            self._assistant_prefix = True
-            return f"{_PRIMARY}jarvis >[/] {rendered}"
-        return rendered
-
     def _on_tool(self, call) -> None:
-        args = ", ".join(f"{k}={_esc(repr(v))}" for k, v in list(call.arguments.items())[:4])
-        label = f"{_display_name(call.name)}({args})"
+        # Called from the chat worker thread: ALL UI mutation must run on the
+        # app thread via call_from_thread, or textual's DOM races and tool
+        # messages can silently fail to appear / glitch.
+        self._ui_call(self._handle_tool_call, call)
+
+    def _handle_tool_call(self, call) -> None:
+        label = _tool_label(call.name, call.arguments or {})
         self._current_tool_label = label
         self._current_tool = self._new_message(f"  {_SPINNER[0]} {label}", "tool-msg")
         self._tool_spinner_idx = 1
         if self._tool_spinner_timer is None:
             self._tool_spinner_timer = self.set_interval(0.1, self._tick_tool_spinner)
-        self.call_from_thread(self._start_spinner, f"working: {label}")
+        self._start_spinner(f"working: {label}")
 
     def _tick_tool_spinner(self) -> None:
         if self._current_tool is not None:
             frame = _SPINNER[self._tool_spinner_idx % len(_SPINNER)]
-            self._tool_spinner_idx += 1
             self._update_message(self._current_tool, f"  {frame} {self._current_tool_label}")
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
+        self._ui_call(self._handle_tool_done, call, result, duration)
+
+    def _handle_tool_done(self, call, result: str, duration: float) -> None:
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-        summary = _esc((result or "").strip().split("\n", 1)[0][:80])
+        summary = _short(_esc((result or "").strip().split("\n", 1)[0]), 60)
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
         mark = "x" if denied else "+"
         color = _DIM if denied else _GREEN
@@ -613,7 +668,10 @@ class _JarvisApp(App):
                 f"{color}  {mark} {self._current_tool_label} -> {summary} ({duration:.1f}s)[/]",
             )
         self._current_tool = None
-        self.call_from_thread(self._stop_spinner)
+        # The tool result goes back to the model, which thinks again. Re-arm
+        # the status spinner so multi-round turns never look stalled; the next
+        # text chunk (_on_chunk) or _finish_turn stops it.
+        self._start_spinner("thinking...")
 
     def _finish_turn(self) -> None:
         self._flush_md()
