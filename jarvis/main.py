@@ -287,6 +287,23 @@ def snapshot(undo: bool, message: str) -> None:
 
 
 @cli.command()
+def web() -> None:
+    """Run the LAN web channel — talk to JARVIS from your phone's browser."""
+    kernel = _make_kernel()
+    _load_with_sources(kernel)
+    kernel.start_hot_reload_watcher()
+    channel = None
+    for svc in kernel._channels:
+        if getattr(svc, "kind", "") == "web":
+            channel = svc
+            break
+    if channel is None:
+        click.echo("[jarvis] channel-web plugin not loaded; is plugins/channel-web present?")
+        raise click.exceptions.Exit(1)
+    channel.run(kernel)
+
+
+@cli.command()
 def tui() -> None:
     """Run the full-screen TUI channel (requires textual)."""
     kernel = _make_kernel()
@@ -340,3 +357,5 @@ def _builtin_repl(kernel: Kernel) -> None:
 
 if __name__ == "__main__":
     cli()
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 05:27:38 ---

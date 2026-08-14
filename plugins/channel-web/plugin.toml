@@ -1,0 +1,12 @@
+[plugin]
+name = "channel-web"
+kind = "channel"
+version = "0.1.1"
+entry = "plugin.py"
+hot_reload = true
+dependencies = []
+
+[provides]
+tools = []
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 05:27:28 ---
