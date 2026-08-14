@@ -11,6 +11,9 @@ Reads from config (via the config-core plugin) or env vars:
   - openai_base_url  / OPENAI_BASE_URL   e.g. https://opencode.ai/zen/go/v1
   - openai_api_key   / OPENAI_API_KEY
   - model            / MODEL              default model id to request
+  - stream           / JARVIS_STREAM      true (default) = SSE streaming, first
+                         token renders as soon as the upstream produces it;
+                         false = buffered non-streaming fallback
 
 Tool calling is supported: the kernel passes ToolSpecs; this provider forwards
 them as OpenAI `tools` and yields a ChatChunk(tool_call=...) for each function
@@ -149,7 +152,16 @@ class OpenAIProvider:
             )
         return out
 
-    # ---- the chat generator (sync, per PLUGIN_SPEC §5) ----
+    # ---- the chat generator (sync generator, per PLUGIN_SPEC §5) ----
+    # True streaming: the request uses stream=true and the Server-Sent-Events
+    # response is parsed event by event, so the first token arrives as soon as
+    # the upstream produces it. Tool-call arguments arrive split across events
+    # and are accumulated per index. Set [provider-openai] stream=false to use
+    # the non-streaming fallback instead.
+    def _stream_enabled(self) -> bool:
+        v = self._cfg("stream", "JARVIS_STREAM", "true")
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+
     def chat(self, req: ChatRequest):
         if requests is None:
             yield ChatChunk(text="[provider-openai] missing dependency: pip install requests")
@@ -165,12 +177,13 @@ class OpenAIProvider:
         url = f"{base}/chat/completions"
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         self._ensure_name_map(req.tools)
+        stream = self._stream_enabled()
 
         try:
             payload: dict = {
                 "model": model,
                 "messages": self._to_openai_messages(req.messages),
-                "stream": False,
+                "stream": stream,
             }
             tools = self._to_openai_tools(req.tools)
             if tools:
@@ -181,7 +194,9 @@ class OpenAIProvider:
             last_exc: Exception | None = None
             for attempt in range(3):
                 try:
-                    resp = requests.post(url, headers=headers, json=payload, timeout=120)
+                    resp = requests.post(
+                        url, headers=headers, json=payload, timeout=120, stream=stream
+                    )
                     break
                 except Exception as exc:  # noqa: BLE001
                     last_exc = exc
@@ -192,38 +207,89 @@ class OpenAIProvider:
             if resp.status_code != 200:
                 yield ChatChunk(text=f"[provider-openai] HTTP {resp.status_code}: {resp.text[:400]}")
                 return
-            data = resp.json()
-            choice = data["choices"][0]
+            if stream:
+                yield from self._consume_stream(resp)
+            else:
+                yield from self._consume_json(resp)
         except Exception as exc:  # noqa: BLE001
-            # non-JSON body, empty choices, missing keys ... report instead of crash
-            yield ChatChunk(text=f"[provider-openai] invalid upstream response: {exc}")
-            return
+            # malformed stream, missing keys ... report instead of crash
+            yield ChatChunk(text=f"[provider-openai] stream error: {exc}")
 
+    def _consume_stream(self, resp):
+        """Parse a Server-Sent-Events response, yielding chunks as they arrive."""
+        tool_acc: dict[int, dict] = {}
+        usage = None
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw or not raw.startswith("data:"):
+                continue
+            data = raw[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except Exception:  # noqa: BLE001
+                continue
+            if event.get("usage"):
+                usage = event["usage"]
+            choices = event.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            if delta.get("reasoning_content"):
+                yield ChatChunk(reasoning=delta["reasoning_content"])
+            if delta.get("content"):
+                yield ChatChunk(text=delta["content"])
+            for tc in delta.get("tool_calls") or []:
+                idx = int(tc.get("index", 0))
+                acc = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if tc.get("id"):
+                    acc["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    acc["name"] = fn["name"]
+                if fn.get("arguments"):
+                    acc["arguments"] += fn["arguments"]
+        # emit accumulated tool calls in index order
+        for idx in sorted(tool_acc):
+            acc = tool_acc[idx]
+            try:
+                args = json.loads(acc["arguments"] or "{}")
+            except Exception:  # noqa: BLE001
+                args = {}
+            wire = acc["name"] or ""
+            yield ChatChunk(
+                tool_call=ToolCall(
+                    id=acc["id"] or "",
+                    name=self._name_map.get(wire, wire),
+                    arguments=args,
+                )
+            )
+        done_chunk = ChatChunk(done=True)
+        if usage and hasattr(done_chunk, "usage"):
+            done_chunk.usage = usage
+        yield done_chunk
+
+    def _consume_json(self, resp):
+        """Non-streaming fallback (stream=false in config)."""
+        data = resp.json()
+        choice = data["choices"][0]
         msg = choice["message"]
         content = msg.get("content") or ""
         reasoning = msg.get("reasoning_content") or ""
-        raw_calls = msg.get("tool_calls") or []
-
         if content:
             yield ChatChunk(text=content)
         if reasoning:
             yield ChatChunk(reasoning=reasoning)
-
-        for tc in raw_calls:
+        for tc in msg.get("tool_calls") or []:
             fn = tc.get("function", {})
             wire = fn.get("name", "")
-            name = self._name_map.get(wire, wire)  # restore dotted real name
             try:
                 args = json.loads(fn.get("arguments", "{}") or "{}")
             except Exception:  # noqa: BLE001
                 args = {}
             yield ChatChunk(
-                tool_call=ToolCall(id=tc.get("id") or "", name=name, arguments=args)
+                tool_call=ToolCall(id=tc.get("id") or "", name=self._name_map.get(wire, wire), arguments=args)
             )
-
-        # Defensive: the running kernel may predate ChatChunk.usage (the
-        # core types module does not hot-reload), so attach usage only when
-        # the loaded dataclass supports it.
         done_chunk = ChatChunk(done=True)
         usage = data.get("usage")
         if usage and hasattr(done_chunk, "usage"):

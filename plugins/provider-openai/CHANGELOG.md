@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.2.0] - 2026-08-15
+
+### Added
+- true SSE streaming (stream=true): first token arrives as produced, tool-call arguments accumulated per index, usage parsed; non-streaming fallback behind stream=false (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.1.0] - 2026-08-15
 
 ### Added
