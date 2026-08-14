@@ -246,8 +246,19 @@ class Kernel:
         return True
 
     # ---- agent loop ----
-    def chat(self, session: str, user_text: str) -> str:
+    def chat(
+        self,
+        session: str,
+        user_text: str,
+        on_chunk: Callable[[ChatChunk], None] | None = None,
+        on_tool: Callable[[ToolCall], None] | None = None,
+    ) -> str:
         """One conversation turn. Returns assistant text.
+
+        Optional streaming callbacks: ``on_chunk(chunk)`` fires for every
+        provider chunk as it is produced (or replayed from cache), and
+        ``on_tool(call)`` fires before each tool invocation — channels use
+        these to render output live instead of waiting for the full reply.
 
         Each round takes a fresh snapshot of the tool table; both the provider
         request and tool dispatch use that same snapshot, so a hot-reload
@@ -336,6 +347,11 @@ class Kernel:
             reasoning_text = ""
             pending_calls: list[ToolCall] = []
             for chunk in _provider_chunks(req):
+                if on_chunk is not None:
+                    try:
+                        on_chunk(chunk)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if chunk.text:
                     reply_text += chunk.text
                 if chunk.reasoning:
@@ -364,6 +380,11 @@ class Kernel:
                 )
             )
             for call in pending_calls:
+                if on_tool is not None:
+                    try:
+                        on_tool(call)
+                    except Exception:  # noqa: BLE001
+                        pass
                 result = self._invoke_tool(call, tool_table)
                 history.append(ChatMessage(role="tool", content=result, name=call.name))
 

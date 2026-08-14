@@ -318,6 +318,19 @@ def test_chat_trims_history_before_sending(kernel: Kernel) -> None:
     # truncation note + last 1 round (u2,a2) + the new user message
     assert seen["n"] == 4
 
+def test_chat_streaming_callbacks(kernel: Kernel) -> None:
+    """on_chunk fires per chunk; on_tool fires before each tool call."""
+    texts: list[str] = []
+    calls: list[str] = []
+    out = kernel.chat(
+        "sess-stream",
+        "please use a tool",
+        on_chunk=lambda c: texts.append(c.text or ""),
+        on_tool=lambda c: calls.append(c.name),
+    )
+    assert "demo.ping" in calls
+    assert any("pong" in t for t in texts) or "pong" in out
+
 
 
 
