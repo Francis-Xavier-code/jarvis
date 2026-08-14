@@ -41,6 +41,7 @@ TOML,且只能有一个 `[plugin]` 表:
 | `version` | string | 否 | `"0.0.0"` | 类似 semver,仅供说明 |
 | `entry` | string | 否 | `"plugin.py"` | 目录内的入口文件名 |
 | `hot_reload` | bool | 否 | `true` | 若为 false,内核不会在文件变更时自动重载它 |
+| `lazy` | bool | 否 | `false` | 仅对 `kind="tool"` 有效:跳过 setup,只注册 `provides.tools` 声明的轻量存根,首次被调用时才真正加载插件 |
 | `dependencies` | list | 否 | `[]` | **[GAP]** 已声明但内核不会自动安装(见 §6) |
 | `provides` | table | 否 | `{}` | 说明性:列出该插件暴露的工具/服务名 |
 
@@ -270,4 +271,3 @@ v1.0 中 `plugin.toml` 里的 `dependencies` **已声明但内核不会执行**�
 `plugin.log_change(plugin, note, kind)` 工具(agent-tools)可以自动完成这两步,
 并用 JARVIS 身份盖章条目。`jarvis doctor` 会检查每个插件是否都有 CHANGELOG.md,
 以及版本号与最新 changelog 条目是否一致。
-

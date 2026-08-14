@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .types import KernelApi
+from .types import KernelApi, ToolSpec
 
 
 class PluginManifest(BaseModel):
@@ -34,8 +34,12 @@ class PluginManifest(BaseModel):
     version: str = "0.0.0"
     entry: str = "plugin.py"
     hot_reload: bool = True
+    # lazy: skip setup() at startup and register lightweight tool stubs from
+    # provides.tools instead; the first tool call loads the plugin for real.
+    # Only meaningful for kind="tool" plugins (services must be eager).
+    lazy: bool = False
     dependencies: list[str] = Field(default_factory=list)
-    provides: dict[str, list[str]] = Field(default_factory=dict)
+    provides: dict = Field(default_factory=dict)
 
 
 class Plugin:
@@ -83,7 +87,12 @@ class PluginManager:
                 continue
             try:
                 data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
-                manifest = PluginManifest.model_validate(data["plugin"])
+                # [provides] is a top-level table; fold it into the manifest so
+                # plugins can declare their tool surface for lazy stubs etc.
+                plugin_data = dict(data.get("plugin", {}))
+                if isinstance(data.get("provides"), dict):
+                    plugin_data["provides"] = data["provides"]
+                manifest = PluginManifest.model_validate(plugin_data)
             except Exception as exc:  # noqa: BLE001
                 self._load_errors[child.name] = f"manifest invalid: {exc}"
                 continue
@@ -118,7 +127,58 @@ class PluginManager:
     def load_all(self) -> None:
         for plugin in self.discover():
             self.plugins[plugin.name] = plugin
-            self._load_plugin(plugin)
+            if plugin.manifest.lazy and plugin.manifest.kind == "tool":
+                self._register_stub(plugin)
+            else:
+                self._load_plugin(plugin)
+
+    def _register_stub(self, plugin: Plugin) -> None:
+        """Register lightweight tool stubs for a lazy plugin.
+
+        The LLM sees the tool name and a short description (cheap per turn),
+        and the first call triggers a real load via :meth:`_ensure_loaded`.
+        provides.tools entries may be plain names or dicts with
+        name/description/parameters.
+        """
+        provides = plugin.manifest.provides or {}
+        for tool in provides.get("tools", []):
+            if isinstance(tool, str):
+                name, desc, params = tool, f"(lazy) {plugin.name}", {}
+            else:
+                name = tool.get("name", "")
+                desc = tool.get("description", f"(lazy) {plugin.name}")
+                params = tool.get("parameters", {})
+            if not name:
+                continue
+            self.kernel._register_tool(
+                ToolSpec(
+                    name=name,
+                    description=desc,
+                    parameters=params if isinstance(params, dict) else {},
+                    handler=self._lazy_handler(plugin, name),
+                    plugin=plugin.name,
+                )
+            )
+
+    def _lazy_handler(self, plugin: Plugin, tool_name: str):
+        """Handler that loads the plugin on first call, then dispatches to the
+        real (plugin-registered) handler."""
+        def handler(**kwargs):
+            if not self._ensure_loaded(plugin):
+                return f"[error] lazy plugin {plugin.name} failed to load"
+            spec = self.kernel._tools.get(tool_name)
+            if spec is None or spec.handler is None:
+                return f"[error] tool {tool_name} unavailable after load"
+            return spec.handler(**kwargs)
+        return handler
+
+    def _ensure_loaded(self, plugin: Plugin) -> bool:
+        if plugin.module is not None:
+            return True
+        ok = self._load_plugin(plugin)
+        if not ok:
+            self._load_errors[plugin.name] = self._load_errors.get(plugin.name, "lazy load failed")
+        return ok
 
     @staticmethod
     def _module_name(name: str) -> str:
@@ -188,6 +248,16 @@ class PluginManager:
                 pass
         self.kernel._unregister_plugin(name)
         self._purge_module(name)
+        if plugin.manifest.lazy and plugin.manifest.kind == "tool":
+            # keep it lazy after a hot-reload unless it was already loaded
+            was_loaded = plugin.module is not None
+            plugin.module = None
+            if was_loaded:
+                ok = self._load_plugin(plugin)
+            else:
+                self._register_stub(plugin)
+                ok = True
+            return ok
         ok = self._load_plugin(plugin)
         if not ok:
             # roll back to the previous registrations so the capability survives

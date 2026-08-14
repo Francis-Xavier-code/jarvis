@@ -298,4 +298,3 @@ The `plugin.log_change(plugin, note, kind)` tool (agent-tools) performs both
 steps automatically and stamps the entry with the JARVIS identity. `jarvis
 doctor` verifies every plugin has a CHANGELOG.md and that its version matches
 the newest changelog entry.
-
