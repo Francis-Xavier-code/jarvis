@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -119,16 +120,35 @@ class PluginManager:
             self.plugins[plugin.name] = plugin
             self._load_plugin(plugin)
 
+    @staticmethod
+    def _module_name(name: str) -> str:
+        """Safe module namespace for a plugin (dots/dashes become underscores)."""
+        return f"jarvis_plugin_{name.replace('-', '_').replace('.', '_')}"
+
+    @staticmethod
+    def _purge_module(name: str) -> None:
+        """Drop a plugin's modules (and its submodules) from sys.modules so a
+        hot-reload re-imports them fresh."""
+        base = PluginManager._module_name(name)
+        for m in [m for m in sys.modules if m == base or m.startswith(base + ".")]:
+            sys.modules.pop(m, None)
+
     def _load_plugin(self, plugin: Plugin) -> bool:
         try:
             self.kernel._set_active(plugin.name)
+            mod_name = self._module_name(plugin.name)
             spec = importlib.util.spec_from_file_location(
-                f"jarvis_plugin_{plugin.name}",
+                mod_name,
                 plugin.path / plugin.manifest.entry,
             )
             if spec is None or spec.loader is None:
                 raise ImportError("cannot build import spec")
             module = importlib.util.module_from_spec(spec)
+            # Treat the plugin directory as a package so plugins may split
+            # into submodules (e.g. `from .render import render_md`).
+            module.__package__ = mod_name
+            module.__path__ = [str(plugin.path)]
+            sys.modules[mod_name] = module
             spec.loader.exec_module(module)
             if not hasattr(module, "setup"):
                 raise ImportError("plugin has no setup()")
@@ -167,6 +187,7 @@ class PluginManager:
             except Exception:  # noqa: BLE001
                 pass
         self.kernel._unregister_plugin(name)
+        self._purge_module(name)
         ok = self._load_plugin(plugin)
         if not ok:
             # roll back to the previous registrations so the capability survives
