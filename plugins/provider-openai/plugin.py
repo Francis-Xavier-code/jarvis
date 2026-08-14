@@ -221,7 +221,14 @@ class OpenAIProvider:
                 tool_call=ToolCall(id=tc.get("id") or "", name=name, arguments=args)
             )
 
-        yield ChatChunk(done=True, usage=data.get("usage") or None)
+        # Defensive: the running kernel may predate ChatChunk.usage (the
+        # core types module does not hot-reload), so attach usage only when
+        # the loaded dataclass supports it.
+        done_chunk = ChatChunk(done=True)
+        usage = data.get("usage")
+        if usage and hasattr(done_chunk, "usage"):
+            done_chunk.usage = usage
+        yield done_chunk
 
 
 def setup(kernel: KernelApi) -> None:

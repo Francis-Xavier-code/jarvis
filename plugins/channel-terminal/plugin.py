@@ -41,7 +41,9 @@ Commands:
 Input:
   - end a line with \\ to continue on the next line
   - paste a multi-line block and it is sent as a single message
-  - Ctrl-C interrupts the assistant while it is replying
+  - while JARVIS is replying, your keystrokes are queued: they become the
+    NEXT message after the reply finishes (the current reply cannot see
+    them). Press Ctrl-C to interrupt the current reply and start fresh.
 """
 
 
@@ -117,11 +119,30 @@ def _handle_command(text: str) -> "str | None":
 class _TerminalChannel:
     kind = "terminal"
 
+    def __init__(self) -> None:
+        self._segment = "text"  # current stream segment: "text" | "reasoning"
+        self._started = False   # have we printed any content yet?
+
     def _stream_chunk(self, chunk) -> None:
-        if chunk.text:
+        if os.environ.get("JARVIS_SHOW_REASONING") == "1":
+            # Opt-in thinking chain. Reasoning precedes text in the stream:
+            # emit in that order, on fresh lines per segment, "🧠" once per
+            # segment, so chunks never glue together or interleave.
+            for kind, content in (("reasoning", chunk.reasoning), ("text", chunk.text)):
+                if not content:
+                    continue
+                if kind != self._segment:
+                    if self._started:
+                        print()
+                    self._segment = kind
+                    self._started = True
+                if kind == "reasoning":
+                    print(_c(_DIM, "🧠 " + content), end="", flush=True)
+                else:
+                    print(content, end="", flush=True)
+        elif chunk.text:
+            # Default: keep the thinking chain out of the terminal.
             print(chunk.text, end="", flush=True)
-        if chunk.reasoning:
-            print(_c(_DIM, "🧠 " + chunk.reasoning), end="", flush=True)
 
     def _stream_tool(self, call) -> None:
         args = ", ".join(f"{k}={v!r}" for k, v in list(call.arguments.items())[:5])
@@ -150,12 +171,15 @@ class _TerminalChannel:
             print()
             try:
                 if stream:
+                    print(_c(_DIM, "\u231b thinking\u2026 (Ctrl-C interrupts; your next input queues)"), flush=True)
                     reply = kernel.chat(
                         session, text, on_chunk=self._stream_chunk, on_tool=self._stream_tool
                     )
                     print()
                 else:
+                    print(_c(_DIM, "\u231b thinking\u2026"), flush=True)
                     reply = kernel.chat(session, text)
+                    print()
                     print("jarvis>", render_md(reply))
             except KeyboardInterrupt:
                 print("\n[jarvis] interrupted.")
@@ -167,3 +191,5 @@ def setup(kernel: KernelApi) -> None:
 
 def teardown(kernel: KernelApi) -> None:
     pass
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:42:40 ---

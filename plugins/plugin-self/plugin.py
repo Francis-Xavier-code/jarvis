@@ -37,7 +37,9 @@ def setup(kernel: KernelApi) -> None:
                 f"Callable tools ({s['n_tools']}): {tool_names}. "
                 "Each tool\'s purpose and parameters are described in your tools list; call the right one "
                 "instead of guessing. Use self.capabilities for the full inventory with descriptions, "
-                "self.config for config keys, and mem.recall to revisit remembered facts."
+                "self.config for config keys, and mem.recall to revisit remembered facts. "
+                "When modifying files, use the fs.* tools - they sign your edits with your "
+                "identity (config [agent-identity]) for traceability."
             )
 
     kernel.service("self", _SelfService())
