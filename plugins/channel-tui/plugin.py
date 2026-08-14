@@ -22,7 +22,7 @@ import time
 from jarvis.types import KernelApi
 
 from . import ui
-from .ui import render_big, shimmer_line
+from .ui import GLYPHS, FRAMES, render_big, render_whale, shimmer_line
 
 # ---- soft dependency ----
 try:

@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.2] - 2026-08-15
+
+### Fixed
+- fix: restore render_whale import (dropped when JARVIS slimmed the ui imports in the auto-approve batch) - NameError on startup (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.1] - 2026-08-15
 
 ### Fixed
