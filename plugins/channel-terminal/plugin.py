@@ -162,6 +162,26 @@ class _TerminalChannel:
         color = _DIM if denied else _GREEN
         print(_c(color, f" {mark} {call.name} -> {summary} ({duration:.1f}s)"), flush=True)
 
+def _replay_history(kernel, session: str, limit: int = 40) -> None:
+    """Print the tail of the persisted conversation at startup, so a restart
+    does not lose context in the terminal channel either."""
+    try:
+        msgs = kernel.history(session)
+    except Exception:  # noqa: BLE001
+        return
+    if not msgs:
+        return
+    print(_c(_DIM, f"--- {len(msgs)} messages on record; showing last {limit} ---"))
+    for m in msgs[-limit:]:
+        if m.role == "user":
+            print(_c(_YELLOW, f"you> {m.content}"))
+        elif m.role == "assistant" and m.content:
+            print(f"jarvis> {m.content}")
+        elif m.role == "tool":
+            first = (m.content or "").strip().split("\n", 1)[0]
+            print(_c(_DIM, f"  {m.name or 'tool'}: {first[:60]}"))
+
+
 def _render_reply(kernel, reply: str) -> "str | None":
     """Buffered-mode rendering: when a `render` service is registered (e.g. the
     mdcat-render plugin), use it and return its output; otherwise return None
@@ -189,6 +209,11 @@ class _TerminalChannel:
         _setup_readline(kernel.data_dir)
         stream = os.environ.get("JARVIS_NO_STREAM", "") == ""
         print("JARVIS (terminal channel). Type 'exit' or Ctrl-D to quit. '/help' for help.")
+        # replay the persisted conversation so a restart doesn't lose context
+        try:
+            _replay_history(kernel, session)
+        except Exception:  # noqa: BLE001
+            pass
         while True:
             try:
                 text = _read_message()
