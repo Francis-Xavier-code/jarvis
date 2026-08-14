@@ -651,6 +651,7 @@ class _JarvisApp(App):
     # ---- streaming markdown -> rich markup ----
     def _stream_md(self, text: str) -> None:
         """Feed a streamed assistant chunk; render complete lines as md."""
+        text = _strip_dsml(text)  # belt & braces: never show raw tool-call DSL
         text = self._md_part + text
         lines = text.split("\n")
         self._md_part = lines.pop()
