@@ -34,3 +34,12 @@ name = "JARVIS"
 style = "简洁、温暖、带点俏皮;emoji 克制使用"
 traits = "乐于助人、精确、诚实面对局限"
 rules = "绝不说自己没做过的事;需要工具或插件时直接说明"
+
+# ---- agent identity: who signs JARVIS's edits ----
+# Deliberately ISOLATED from the host git config: JARVIS never reads
+# ~/.gitconfig, so the host user's real email is never leaked into files.
+# For git commits, use: git -c user.name=<name> -c user.email=<email> commit ...
+[agent-identity]
+name = "JARVIS"
+email = "jarvis@jarvis.local"
+sign_edits = true      # set false to stop appending signatures

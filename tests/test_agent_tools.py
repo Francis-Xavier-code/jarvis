@@ -22,6 +22,8 @@ def tools(tmp_path: Path, monkeypatch) -> Kernel:
     k = Kernel(plugins_dir=str(plugins), data_dir=str(tmp_path / "data"))
     k.load()
     k.confirm_action = lambda prompt: True  # auto-approve by default
+    # most tests assert exact file contents; signing is tested separately
+    k.set_config({"agent-identity": {"sign_edits": False}})
     return k
 
 
@@ -116,4 +118,44 @@ def test_reload_failure_keeps_old_tools(tools: Kernel) -> None:
 def test_kernel_confirm_refuses_when_no_handler(tools: Kernel) -> None:
     tools.confirm_action = None
     assert tools.confirm("run this?") is False
+
+def test_edits_are_signed_with_isolated_identity(tools: Kernel) -> None:
+    """fs.write appends a JARVIS signature using its own (host-isolated) email."""
+    tools.set_config({"agent-identity": {"sign_edits": True}})
+    _h(tools, "fs.write")("sig.py", "x = 1")
+    content = _h(tools, "fs.read")("sig.py")
+    assert "last modified by JARVIS <jarvis@jarvis.local>" in content
+
+
+def test_signature_uses_configured_email_not_host(tools: Kernel) -> None:
+    """The signature email comes from JARVIS config, never from host git config."""
+    tools.set_config({
+        "agent-identity": {"name": "MyJarvis", "email": "jarvis@mycorp.test", "sign_edits": True},
+    })
+    _h(tools, "fs.write")("sig2.py", "y = 2")
+    content = _h(tools, "fs.read")("sig2.py")
+    assert "MyJarvis <jarvis@mycorp.test>" in content
+    assert "jarvis@jarvis.local" not in content
+
+
+def test_signature_is_idempotent(tools: Kernel) -> None:
+    tools.set_config({"agent-identity": {"sign_edits": True}})
+    _h(tools, "fs.write")("sig3.py", "a")
+    _h(tools, "fs.write")("sig3.py", "b")
+    content = _h(tools, "fs.read")("sig3.py")
+    assert content.count("last modified by") == 1
+
+
+def test_signature_skips_json(tools: Kernel) -> None:
+    """Formats with no comment syntax (JSON) are never signed - no corruption."""
+    tools.set_config({"agent-identity": {"sign_edits": True}})
+    _h(tools, "fs.write")("data.json", '{"a": 1}')
+    assert _h(tools, "fs.read")("data.json") == '{"a": 1}'
+
+
+def test_agent_identity_tool(tools: Kernel) -> None:
+    out = _h(tools, "agent.identity")()
+    assert "jarvis@jarvis.local" in out
+    assert "-c user.email" in out  # git isolation hint
+
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -39,6 +40,86 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... (truncated {len(text) - limit} chars)"
+
+
+DEFAULT_IDENTITY = {"name": "JARVIS", "email": "jarvis@jarvis.local", "sign_edits": True}
+
+
+# Comment style per file type; None means "do not sign" (would corrupt the file).
+_COMMENT_STYLES = {
+    ".py": "#", ".sh": "#", ".toml": "#", ".ini": "#", ".cfg": "#",
+    ".yaml": "#", ".yml": "#", ".rb": "#", ".pl": "#", ".bash": "#",
+    ".zsh": "#", ".fish": "#", ".mk": "#",
+    ".js": "//", ".ts": "//", ".jsx": "//", ".tsx": "//",
+    ".c": "//", ".cpp": "//", ".h": "//", ".hpp": "//", ".go": "//",
+    ".rs": "//", ".java": "//", ".swift": "//", ".kt": "//", ".php": "//",
+    ".css": "/* */",
+    ".html": "<!-- -->", ".xml": "<!-- -->", ".svg": "<!-- -->",
+    ".md": "<!-- -->", ".markdown": "<!-- -->",
+    ".sql": "--", ".lua": "--",
+    ".txt": "plain",
+}
+
+
+# ---- JARVIS identity (isolated from the host git config) ----
+def _identity(kernel: KernelApi) -> "tuple[str, str, bool]":
+    """JARVIS's own identity used to sign edits.
+
+    Reads ONLY the JARVIS config ([agent-identity] section) and falls back to a
+    local-only default. It deliberately never consults ~/.gitconfig / `git
+    config`, so the host user's real email is never leaked into files.
+    """
+    cfg = kernel.config.get("agent-identity", {}) or {}
+    name = str(cfg.get("name") or DEFAULT_IDENTITY["name"]).strip()
+    email = str(cfg.get("email") or DEFAULT_IDENTITY["email"]).strip()
+    sign = cfg.get("sign_edits", DEFAULT_IDENTITY["sign_edits"])
+    if isinstance(sign, str):
+        sign = sign.strip().lower() in ("1", "true", "yes", "on")
+    return name, email, bool(sign)
+
+
+def _comment_style(path: Path) -> "str | None":
+    return _COMMENT_STYLES.get(path.suffix.lower())
+
+
+def _sign_file(kernel: KernelApi, p: Path) -> None:
+    """Append a traceable "last modified by JARVIS <email>" signature.
+
+    Idempotent per identity (a file already signed by this email is not
+    re-signed), format-aware (comment syntax per file type; JSON/binary and
+    unknown formats are skipped to avoid corruption), and runs AFTER the
+    auto-backup so backups stay pristine.
+    """
+    name, email, enabled = _identity(kernel)
+    if not enabled:
+        return
+    style = _comment_style(p)
+    if style is None:
+        return
+    try:
+        content = p.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return
+    if re.search(rf"modified by .*<{re.escape(email)}>", content):
+        return  # already signed by this identity
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    if style == "#":
+        block = f"\n# --- last modified by {name} <{email}> on {ts} ---\n"
+    elif style == "//":
+        block = f"\n// --- last modified by {name} <{email}> on {ts} ---\n"
+    elif style == "/* */":
+        block = f"\n/* --- last modified by {name} <{email}> on {ts} --- */\n"
+    elif style == "<!-- -->":
+        block = f"\n<!-- --- last modified by {name} <{email}> on {ts} --- -->\n"
+    elif style == "--":
+        block = f"\n-- --- last modified by {name} <{email}> on {ts} ---\n"
+    else:  # plain text
+        block = f"\n--- last modified by {name} <{email}> on {ts} ---\n"
+    try:
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(block)
+    except OSError:
+        pass
 
 
 def _root() -> Path:
@@ -168,6 +249,7 @@ def setup(kernel: KernelApi) -> None:
             p.write_text(content, encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             return f"[fs] write failed: {exc}"
+        _sign_file(kernel, p)
         return f"[fs] wrote {len(content)} chars to {p}"
 
     @kernel.tool(
@@ -191,6 +273,7 @@ def setup(kernel: KernelApi) -> None:
             return f"[fs] old matched {count} times (must match exactly once)"
         _backup(kernel, p)
         p.write_text(content.replace(old, new, 1), encoding="utf-8")
+        _sign_file(kernel, p)
         return f"[fs] replaced in {p}"
 
     @kernel.tool(
@@ -210,6 +293,7 @@ def setup(kernel: KernelApi) -> None:
                 fh.write(content)
         except Exception as exc:  # noqa: BLE001
             return f"[fs] append failed: {exc}"
+        _sign_file(kernel, p)
         return f"[fs] appended {len(content)} chars to {p}"
 
     @kernel.tool(
@@ -263,6 +347,19 @@ def setup(kernel: KernelApi) -> None:
         except Exception as exc:  # noqa: BLE001
             return f"[fs] restore failed: {exc}"
         return f"[fs] restored {p} from backup {backup.name}"
+
+    @kernel.tool(
+        "agent.identity",
+        "Show JARVIS's own identity (name/email) used to sign edits - isolated from the host git config",
+    )
+    def agent_identity() -> str:
+        name, email, sign = _identity(kernel)
+        return (
+            f"name: {name}\nemail: {email}\nsign_edits: {sign}\n"
+            "This identity comes from JARVIS config [agent-identity] (or a local-only default) "
+            "and NEVER reads the host ~/.gitconfig. For git commits, stay isolated with:\n"
+            f"    git -c user.name={name} -c user.email={email} commit ..."
+        )
 
 
 def teardown(kernel: KernelApi) -> None:

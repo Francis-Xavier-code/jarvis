@@ -22,6 +22,24 @@ can do work on this machine instead of just talking about it.
 * **Refused outright**: `config.toml` (holds secrets) for read *and* write;
   writes into `.git/`, `.venv/`, `data/`, `sessions/`, `backups/`.
 
+## Edit signatures & identity isolation
+
+Every `fs.write` / `fs.edit` / `fs.append` appends a traceable signature to the
+file, so you can always tell which code JARVIS wrote:
+
+```
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:23:45 ---
+```
+
+* The signature uses **JARVIS's own identity** (config `[agent-identity]`,
+  default `jarvis@jarvis.local`) — it **never reads the host `~/.gitconfig`**,
+  so your real email never leaks into files.
+* Comment syntax is chosen per file type; JSON/binary and unknown formats are
+  skipped so they are never corrupted. Signing is idempotent per identity.
+* For git commits, stay isolated with
+  `git -c user.name=JARVIS -c user.email=<email> commit ...` (see
+  `agent.identity` tool).
+
 ## Rollback safety (self-repair loop)
 
 Every write/edit/append snapshots the previous file into

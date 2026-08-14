@@ -21,6 +21,21 @@
 * **直接拒绝**:`config.toml`(含密钥)读和写都拒;`.git/`、`.venv/`、`data/`、
   `sessions/`、`backups/` 拒绝写入。
 
+## 编辑签名与身份隔离
+
+每次 `fs.write` / `fs.edit` / `fs.append` 都会在文件末尾追加一条可追溯签名,让你一眼
+看出哪些代码是 JARVIS 写的:
+
+```
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:23:45 ---
+```
+
+* 签名使用 **JARVIS 自己的身份**(config `[agent-identity]`,默认 `jarvis@jarvis.local`)
+  —— **绝不读取宿主机 `~/.gitconfig`**,你的真实邮箱不会泄露进文件。
+* 按文件类型选择注释语法;JSON/二进制/未知格式跳过,绝不破坏文件。按身份幂等,不重复追加。
+* git 提交时保持隔离:`git -c user.name=JARVIS -c user.email=<email> commit ...`
+  (见 `agent.identity` 工具)。
+
 ## 回退保底(自我修复闭环)
 
 每次 write/edit/append 都会把原文件快照到 `<data_dir>/backups/`(保留最近 5 份)。
