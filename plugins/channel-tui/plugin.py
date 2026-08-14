@@ -167,7 +167,7 @@ class _SplashScreen(Screen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="splash-root"):
             yield Static("", id="splash-big")
-            yield Static(f"[{_DIM}]microkernel · everything is a plugin[/]", id="splash-tag")
+            yield Static(f"{_DIM}microkernel · everything is a plugin[/]", id="splash-tag")
 
     def on_mount(self) -> None:
         self._big_rows = render_big("JARVIS")
