@@ -155,6 +155,14 @@ class ConfigApi:
         self._kernel = kernel
 
     def get(self, key: str, default: Any = None) -> Any:
+        # Supports dotted paths into TOML sections, e.g.
+        #   config.get("provider-openai.openai_api_key")
+        # falls back to a flat top-level lookup for non-sectioned keys.
+        if "." in key:
+            section, _, sub = key.partition(".")
+            sec = self._kernel._config_get(section)
+            if isinstance(sec, dict) and sub in sec:
+                return sec[sub]
         return self._kernel._config_get(key, default)
 
     def watch(self, key: str, cb: Callable[[str, Any], None]) -> None:

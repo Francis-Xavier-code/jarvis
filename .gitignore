@@ -11,8 +11,13 @@ uv.lock
 data/
 sessions/
 
+# Local secrets / config — NEVER commit. Contains API keys.
+config.toml
+.env
+*.local.toml
+
 # Agent
-.hermes
+.hermes/
 
 # OS
 .DS_Store

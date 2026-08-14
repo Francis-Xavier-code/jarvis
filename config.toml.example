@@ -1,0 +1,19 @@
+# JARVIS local config — COPY THIS to config.toml and fill in your key.
+# config.toml is gitignored (NEVER commit it — it holds secrets).
+#
+# All keys are read by plugins at startup (config-core loads this file first,
+# then provider-openai / channels read the values they need).
+#
+# Anything under [section] is a nested dict: e.g. [provider-openai] below is
+# read by provider-openai as config.get("provider-openai", {}).
+
+# ---- model provider (OpenAI-compatible) ----
+[provider-openai]
+openai_base_url = "https://opencode.ai/zen/go/v1"
+openai_api_key = "sk-REPLACE-ME"          # the only secret — keep out of git
+model = "deepseek-v4-flash"                # cheap + fast; aggregator has no gemini
+
+# ---- Home Assistant (optional; only needed for hass.* tools) ----
+[homeassistant]
+ha_base_url = "http://192.168.1.100:8123"
+ha_token = "REPLACE-ME"

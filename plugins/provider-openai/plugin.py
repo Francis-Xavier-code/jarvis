@@ -52,7 +52,8 @@ class OpenAIProvider:
 
     # ---- config helpers ----
     def _cfg(self, key: str, env: str, default: str = "") -> str:
-        val = self._kernel.config.get(key, "")
+        # config.toml groups this plugin's settings under [provider-openai]
+        val = self._kernel.config.get(f"provider-openai.{key}", "")
         if not val:
             val = os.environ.get(env, "")
         return val or default

@@ -13,7 +13,8 @@ from pathlib import Path
 
 from jarvis.types import KernelApi
 
-CONFIG_PATH = Path(os.environ.get("JARVIS_CONFIG", "")) or (
+_env_cfg = os.environ.get("JARVIS_CONFIG")
+CONFIG_PATH = Path(_env_cfg) if _env_cfg else (
     Path(__file__).resolve().parents[2] / "config.toml"
 )
 
