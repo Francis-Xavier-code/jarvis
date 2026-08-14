@@ -8,6 +8,21 @@ A minimal terminal REPL channel. Registers a `channel` service; the kernel's
 - **kind**: `channel`
 - **provides**: a channel *service* (`_TerminalChannel.run`)
 
+## What it does about Markdown
+
+The LLM replies in **Markdown** — which Telegram renders natively but a plain
+terminal cannot. Presentation is this channel's job, so it translates the
+Markdown into something readable:
+
+- **TTY (a real terminal)**: renders with ANSI — bold headings, colored
+  bullets, fenced code blocks. If `rich` is installed it is used for even
+  nicer output.
+- **non-TTY / piped / `NO_COLOR` set**: strips Markdown markers and prints
+  plain text, so logs and pipes stay clean.
+
+The renderer (`render.py`) is **stdlib-only** — `rich` is optional. The channel
+is hot-reloadable like every plugin.
+
 ## Usage
 
 ```

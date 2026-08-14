@@ -23,6 +23,9 @@ from .types import (
     ToolSpec,
 )
 
+# Config keys whose values should never be surfaced to the assistant.
+_SECRET_HINTS = ("api_key", "token", "secret", "password", "passwd")
+
 
 class Kernel:
     def __init__(self, plugins_dir: str, data_dir: str) -> None:
@@ -92,7 +95,13 @@ class Kernel:
                     self._channels = [c for c in self._channels if getattr(c, "_jarvis_plugin", None) != name]
 
     def _state_snapshot(self) -> dict:
-        """Read-only view of kernel state (for the self-awareness tools)."""
+        """Read-only view of kernel state (for the self-awareness tools).
+
+        ``tools`` carries each registered tool's name and description (the live
+        routing table is authoritative; ``provides`` in manifests can drift).
+        ``config_keys`` lists configured keys with secrets redacted, so the
+        assistant can see what is set without leaking api keys / tokens.
+        """
         provider = self._provider_svc
         plugins = []
         for name, p in sorted(self.manager.plugins.items()):
@@ -102,13 +111,22 @@ class Kernel:
                 "kind": p.manifest.kind,
                 "tools": list(provides.get("tools", [])),
             })
+        tools = [
+            {"name": name, "description": spec.description or ""}
+            for name, spec in sorted(self._tools.items())
+        ]
+        config_keys = sorted(
+            k for k in self._config
+            if not any(h in k.lower() for h in _SECRET_HINTS)
+        )
         return {
             "provider": type(provider).__name__ if provider is not None else "none",
             "model": self._config.get("model", ""),
             "n_plugins": len(self.manager.plugins),
             "n_tools": len(self._tools),
             "plugins": plugins,
-            "tools": sorted(self._tools.keys()),
+            "tools": tools,
+            "config_keys": config_keys,
         }
 
     # ---- config hooks ----
