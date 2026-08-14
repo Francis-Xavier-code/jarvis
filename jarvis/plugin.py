@@ -15,6 +15,7 @@ next turn.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 import tomllib
@@ -45,17 +46,21 @@ class Plugin:
         self._last_signature: str = ""
 
     def signature(self) -> str:
-        """Cheap content fingerprint for change detection."""
-        parts: list[str] = []
+        """Content fingerprint for change detection (sha256 of .py/.toml bytes).
+
+        A content hash (rather than mtime+size) reliably detects same-second,
+        same-size edits on coarse-granularity filesystems.
+        """
+        h = hashlib.sha256()
         for root, _dirs, files in os.walk(self.path):
             for f in sorted(files):
                 if f.endswith((".py", ".toml")):
                     fp = Path(root) / f
                     try:
-                        parts.append(f"{fp.stat().st_mtime:.0f}:{fp.stat().st_size}")
+                        h.update(fp.read_bytes())
                     except OSError:
                         pass
-        return "|".join(parts)
+        return h.hexdigest()
 
 
 class PluginManager:
