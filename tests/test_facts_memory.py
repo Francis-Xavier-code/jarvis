@@ -53,3 +53,27 @@ def test_facts_persist_across_sessions(kernel: Kernel) -> None:
     k2.load()
     out = k2._tools["mem.recall"].handler()
     assert "city: Shanghai" in out
+
+def test_memory_load_dedups_consecutive_duplicates(kernel: Kernel) -> None:
+    """Consecutive duplicate messages (double-submitted input) collapse to one."""
+    from jarvis.types import ChatMessage
+
+    mem = kernel._memory_svc
+    mem.append("sess-dd", ChatMessage(role="user", content="hi"))
+    mem.append("sess-dd", ChatMessage(role="user", content="hi"))  # duplicate
+    mem.append("sess-dd", ChatMessage(role="assistant", content="ok"))
+    loaded = mem.load("sess-dd")
+    assert [m.content for m in loaded] == ["hi", "ok"]
+
+
+def test_memory_load_keeps_same_text_from_different_tools(kernel: Kernel) -> None:
+    """Two different tools returning identical text must NOT be deduped."""
+    from jarvis.types import ChatMessage
+
+    mem = kernel._memory_svc
+    mem.append("sess-tt", ChatMessage(role="user", content="go"))
+    mem.append("sess-tt", ChatMessage(role="tool", content="exit 0", name="bash.execute"))
+    mem.append("sess-tt", ChatMessage(role="tool", content="exit 0", name="fs.read"))
+    loaded = mem.load("sess-tt")
+    assert [m.name for m in loaded if m.role == "tool"] == ["bash.execute", "fs.read"]
+

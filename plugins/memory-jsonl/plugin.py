@@ -99,16 +99,28 @@ class _JsonlMemory:
         if not p.exists():
             return []
         out: list[ChatMessage] = []
+        prev_key: "tuple[str, str, str | None] | None" = None
         for line in p.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
                 d = json.loads(line)
+                role = d.get("role")
+                if role not in ("user", "assistant", "tool", "system"):
+                    continue  # unknown/malformed role: drop
+                content = d.get("content", "") or ""
+                # name is part of the key so two DIFFERENT tools returning the
+                # same text are never collapsed (tool_call_id pairing relies
+                # on every tool result being present).
+                key = (role, content, d.get("name"))
+                if key == prev_key:
+                    continue  # consecutive duplicate (double-submitted input)
+                prev_key = key
                 out.append(
                     ChatMessage(
-                        role=d["role"],
-                        content=d.get("content", ""),
+                        role=role,
+                        content=content,
                         name=d.get("name"),
                         tool_calls=d.get("tool_calls"),
                         reasoning_content=d.get("reasoning_content"),
@@ -189,3 +201,5 @@ class _JsonlMemory:
         if not facts:
             return ""
         return "\n".join(f"- {f['key']}: {f['value']}" for f in facts[-20:])
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:59:00 ---
