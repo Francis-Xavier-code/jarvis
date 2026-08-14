@@ -24,22 +24,26 @@ from jarvis.types import KernelApi
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
+    from textual.theme import Theme
+    from textual.theme import Theme
     from textual.widgets import Footer, Header, Input, RichLog, Static
     _TEXTUAL_OK = True
 except ImportError:  # pragma: no cover
     _TEXTUAL_OK = False
 
-_GREEN = "[#33ff57]"
-_YELLOW = "[#ffd700]"
+_PRIMARY = "[#7c5cff]"
+_SECONDARY = "[#58a6ff]"
+_GREEN = "[#3fb950]"
+_ORANGE = "[#ff9e64]"
 _DIM = "[dim]"
-_CYAN = "[#00d7ff]"
+_SURFACE = "[on #161b22]"
 
 # ---- streaming Markdown -> Rich markup ----
 # RichLog(markup=True) understands [tags], not Markdown syntax, so we convert
 # the assistant's streamed text line by line before writing it to the panel.
 
 _INLINE_MD = [
-    (re.compile(r"`([^`]+)`"), r"[bold #00d7ff]\1[/]"),
+    (re.compile(r"`([^`]+)`"), r"[#58a6ff]\1[/]"),
     (re.compile(r"\*\*([^*]+)\*\*"), r"[bold]\1[/]"),
     (re.compile(r"__([^_]+)__"), r"[bold]\1[/]"),
     (re.compile(r"\*([^*]+)\*"), r"[italic]\1[/]"),
@@ -76,11 +80,11 @@ def _md_inline(text: str) -> str:
 def _md_block(line: str, in_code: bool) -> str:
     """Render one markdown line as Rich markup (block-level rules)."""
     if in_code:
-        return f"[bold #00d7ff]│ {line}[/]"
+        return f"{_SURFACE} │ {line}[/]"
     stripped = line.strip()
     m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
     if m:
-        return f"[bold #ffd700]{'#' * len(m.group(1))} {_md_inline(m.group(2))}[/]"
+        return f"[bold #7c5cff]{'#' * len(m.group(1))} {_md_inline(m.group(2))}[/]"
     if re.match(r"^(\*{3,}|_{3,}|-{3,})\s*$", stripped):
         return "[dim]" + "─" * 40 + "[/]"
     if stripped.startswith(">"):
@@ -88,16 +92,13 @@ def _md_block(line: str, in_code: bool) -> str:
     m = re.match(r"^(\s*)([-*+])\s+(.*)$", line)
     if m:
         indent = "  " * (len(m.group(1)) // 2)
-        bullet = "[bold #33ff57]•[/]" if not m.group(1) else "[bold #33ff57]–[/]"
+        bullet = "[bold #3fb950]•[/]" if not m.group(1) else "[bold #3fb950]–[/]"
         return f"{indent}{bullet} {_md_inline(m.group(3))}"
     m = re.match(r"^(\s*)(\d+)[.)]\s+(.*)$", line)
     if m:
         indent = "  " * (len(m.group(1)) // 2)
-        return f"{indent}[bold #33ff57]{m.group(2)}.[/] {_md_inline(m.group(3))}"
+        return f"{indent}[bold #3fb950]{m.group(2)}.[/] {_md_inline(m.group(3))}"
     return _md_inline(line)
-
-# tool-call spinner frames (braille dots)
-_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 # tool-call spinner frames (braille dots)
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -114,24 +115,50 @@ def teardown(kernel: KernelApi) -> None:
 class _JarvisApp(App):
     """Textual app: output panel + input box + header/footer."""
 
+    THEMES = {
+        "jarvis-dark": Theme(
+            name="jarvis-dark",
+            primary="#7c5cff",
+            secondary="#58a6ff",
+            accent="#ff9e64",
+            foreground="#e6edf3",
+            background="#0d1117",
+            success="#3fb950",
+            warning="#d29922",
+            error="#f85149",
+            surface="#161b22",
+            panel="#0d1117",
+            dark=True,
+        ),
+    }
+
     CSS = """
+    Screen { background: $background; }
     #out {
         height: 1fr;
-        border: round $primary;
-        padding: 0 1;
         margin: 0 1;
+        padding: 0 1;
+        background: $panel;
     }
     #status {
         height: 1;
-        margin: 0 1;
+        margin: 0 2;
         content-align: left middle;
+        color: $primary;
     }
     #in {
         dock: bottom;
         height: 3;
         margin: 0 1 1 1;
-        border: tall $accent;
+        padding: 0 1;
+        background: $surface;
+        border: hkey $primary;
     }
+    #in:focus {
+        border: hkey $accent;
+    }
+    Header { background: $surface; color: $text; }
+    Footer { background: $surface; }
     """
 
     BINDINGS = [
@@ -167,8 +194,9 @@ class _JarvisApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.theme = "jarvis-dark"
         self._kernel.confirm_action = self._confirm_wait
-        self._write(f"{_GREEN}JARVIS TUI ready. Type /help for commands.[/]")
+        self._write(f"{_PRIMARY}JARVIS ›[/] ready. Type /help for commands.")
         self._focus_input()
 
     def _write(self, text: str) -> None:
@@ -196,9 +224,9 @@ class _JarvisApp(App):
 
     def _show_confirm(self, prompt: str, done: threading.Event, result: list[bool]) -> None:
         self._pending_confirm = (prompt, done, result)
-        self._write(f"{_YELLOW}? {prompt} [y/N] (press y or n)[/]")
+        self._write(f"{_ORANGE}? {prompt} [y/N] (press y or n)[/]")
         self.query_one("#in", Input).placeholder = "answer y or n"
-        self.query_one("#status", Static).update(f"{_YELLOW}⏳ awaiting your y/N[/]")
+        self.query_one("#status", Static).update(f"{_ORANGE}⏳ awaiting your y/N[/]")
         self._focus_input()
 
     def _answer_confirm(self, ans: bool) -> None:
@@ -284,8 +312,10 @@ class _JarvisApp(App):
         self._assistant_prefix = False
         self._turn_start = time.time()
         self._write("")
-        self._write(f"{_CYAN}┌─ you[/]")
-        self._write(f"{_CYAN}│ {text}[/]")
+        lines = text.split("\n")
+        self._write(f"{_SECONDARY}you ›[/] {lines[0]}")
+        for extra in lines[1:]:
+            self._write(f"  {extra}")
         # visible "thinking" animation while waiting for the first token
         self._start_spinner("thinking…")
 
@@ -299,7 +329,7 @@ class _JarvisApp(App):
                     on_tool_done=self._on_tool_done,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.call_from_thread(self._write, f"{_YELLOW}[error] {exc}[/]")
+                self.call_from_thread(self._write, f"{_ORANGE}[error] {exc}[/]")
             finally:
                 self.call_from_thread(self._finish_turn)
 
@@ -317,7 +347,7 @@ class _JarvisApp(App):
     def _tick_spinner(self) -> None:
         frame = _SPINNER[self._spinner_frame % len(_SPINNER)]
         self._spinner_frame += 1
-        self.query_one("#status", Static).update(f"{_YELLOW}{frame} {self._spinner_text}[/]")
+        self.query_one("#status", Static).update(f"{_PRIMARY}{frame} {self._spinner_text}[/]")
 
     def _stop_spinner(self) -> None:
         if self._spinner_timer is not None:
@@ -345,8 +375,8 @@ class _JarvisApp(App):
         if stripped.startswith("```"):
             self._in_code = not self._in_code
             if self._in_code:
-                return "[dim]┌─ code " + "─" * 16 + "[/]"
-            return "[dim]└" + "─" * 24 + "[/]"
+                return f"{_SURFACE} code [/]"
+            return f"{_SURFACE} [/]"
         return _md_block(ln, self._in_code)
 
     def _flush_md(self) -> None:
@@ -359,7 +389,7 @@ class _JarvisApp(App):
         """Prefix the first assistant line with a marker, then never again."""
         if not self._assistant_prefix:
             self._assistant_prefix = True
-            return f"{_GREEN}jarvis›[/] {rendered}"
+            return f"{_PRIMARY}jarvis ›[/] {rendered}"
         return rendered
 
     def _on_tool(self, call) -> None:
