@@ -3,6 +3,8 @@
 The "config is a plugin" proof. Holds `config.toml` and exposes it to every
 other plugin through the kernel's `ConfigApi` (`kernel.config.get` / `.watch`).
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `config`
 - **provides**: a config *service* (not tools)
   - `get(key, default=None)` — read a config value

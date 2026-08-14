@@ -3,6 +3,8 @@
 Per-session conversation history stored as plain JSONL. Minimal, no extra
 dependencies, stateless between calls (safe under hot-reload).
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `memory`
 - **provides**: a memory *service* (not tools)
   - `load(session) -> list[ChatMessage]` — replay a session's history

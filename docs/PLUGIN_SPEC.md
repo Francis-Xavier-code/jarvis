@@ -5,6 +5,8 @@ Follow it and any git repo becomes a usable JARVIS plugin the moment it is
 cloned — no kernel changes, no special registration. The kernel discovers a
 plugin by scanning `plugins/<dir>/plugin.toml`; everything else is derived.
 
+> 中文文档: [PLUGIN_SPEC.zh.md](PLUGIN_SPEC.zh.md)
+
 > **v1.0 is FROZEN.** All previously open decisions are now settled (see §8).
 > Future changes are versioned (v1.1, v2.0, ...). Items marked **[GAP]** are
 > declared-but-not-implemented and will be closed in a later version.

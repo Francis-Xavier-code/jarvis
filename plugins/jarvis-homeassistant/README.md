@@ -3,6 +3,8 @@
 Proof of the core claim: **pull a repo → it becomes a usable JARVIS plugin**.
 This plugin talks to a Home Assistant instance over its REST API.
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `tool`
 - **provides** three tools:
 

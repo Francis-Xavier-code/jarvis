@@ -3,6 +3,8 @@
 A minimal terminal REPL channel. Registers a `channel` service; the kernel's
 `chat` subcommand calls `channel.run(kernel)`.
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `channel`
 - **provides**: a channel *service* (`_TerminalChannel.run`)
 

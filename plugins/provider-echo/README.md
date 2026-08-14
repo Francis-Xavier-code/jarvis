@@ -5,6 +5,8 @@ tool routing → memory → output — **without depending on a real model or an
 api key**. Real providers (`provider-openai`, etc.) are added later as their own
 plugin directories; the architecture does not change.
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `provider`
 - **provides**: a provider *service* (`_EchoProvider.chat`) **and** one tool
 

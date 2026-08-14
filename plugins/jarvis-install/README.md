@@ -4,6 +4,8 @@ The kernel's pull capability, exposed **as a plugin** — because "installing a
 plugin" is itself a capability, it lives in the plugin system like everything
 else.
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 - **kind**: `tool`
 - **provides** two tools:
 

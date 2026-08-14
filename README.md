@@ -2,6 +2,8 @@
 
 > A microkernel AI assistant where **everything is a plugin**.
 
+> 中文文档: [README.zh.md](README.zh.md)
+
 JARVIS is built on one rule: the kernel does almost nothing. LLM providers,
 memory backends, conversation channels (terminal / telegram / web), **and even
 configuration** are all *plugins*. Each plugin is a plain directory under
