@@ -22,8 +22,7 @@ from jarvis.types import KernelApi
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
-    from textual.screen import ModalScreen
-    from textual.widgets import Button, Footer, Header, Input, RichLog, Static
+    from textual.widgets import Footer, Header, Input, RichLog
     _TEXTUAL_OK = True
 except ImportError:  # pragma: no cover
     _TEXTUAL_OK = False
@@ -40,24 +39,6 @@ def setup(kernel: KernelApi) -> None:
 
 def teardown(kernel: KernelApi) -> None:
     pass
-
-
-class _ConfirmScreen(ModalScreen):
-    """y/N confirmation rendered as a modal dialog."""
-
-    def __init__(self, prompt: str, on_result) -> None:
-        super().__init__()
-        self._prompt = prompt
-        self._on_result = on_result
-
-    def compose(self) -> ComposeResult:
-        yield Static(f"{_YELLOW}{self._prompt}[/]", classes="confirm-prompt")
-        yield Button("Yes", id="yes", variant="primary")
-        yield Button("No", id="no", variant="error")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self._on_result(event.button.id == "yes")
-        self.dismiss()
 
 
 class _JarvisApp(App):
@@ -94,6 +75,7 @@ class _JarvisApp(App):
         self._history: list[str] = []
         self._hist_idx: "int | None" = None
         self._partial = ""
+        self._pending_confirm: "tuple[str, threading.Event, list[bool]] | None" = None
 
     # ---- UI wiring ----
     def compose(self) -> ComposeResult:
@@ -117,19 +99,34 @@ class _JarvisApp(App):
         self._busy = busy
         self.query_one(Header).sub_title = "busy..." if busy else "ready"
 
-    # ---- confirm bridge (worker thread <-> UI) ----
+    # ---- confirm bridge (worker thread <-> UI, answered in the input row) ----
     def _confirm_wait(self, prompt: str) -> bool:
-        """Called from the chat worker thread; blocks until the user answers."""
+        """Called from the chat worker thread; blocks until the user answers.
+
+        The prompt is shown at the bottom (output line + input placeholder) and
+        answered with y/N directly on the keyboard - no popup over the output.
+        """
         result: list[bool] = []
         done = threading.Event()
-
-        def push(ans: bool) -> None:
-            result.append(ans)
-            done.set()
-
-        self.call_from_thread(self.push_screen, _ConfirmScreen(prompt, push))
+        self.call_from_thread(self._show_confirm, prompt, done, result)
         done.wait(timeout=180)
         return result[0] if result else False
+
+    def _show_confirm(self, prompt: str, done: threading.Event, result: list[bool]) -> None:
+        self._pending_confirm = (prompt, done, result)
+        self._write(f"{_YELLOW}? {prompt} [y/N] (press y or n)[/]")
+        self.query_one("#in", Input).placeholder = "answer y or n"
+        self._focus_input()
+
+    def _answer_confirm(self, ans: bool) -> None:
+        if self._pending_confirm is None:
+            return
+        _prompt, done, result = self._pending_confirm
+        self._pending_confirm = None
+        self.query_one("#in", Input).placeholder = "message JARVIS... (\\ continues a line, /help for commands)"
+        result.append(ans)
+        done.set()
+        self._write(f"{_DIM}↳ {'yes' if ans else 'no'}[/]")
 
     # ---- input handling ----
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -149,7 +146,16 @@ class _JarvisApp(App):
         self._start_chat(text)
 
     def on_input_key(self, event) -> None:
-        """Up/Down browse history."""
+        """y/N answers the pending confirmation; Up/Down browse history."""
+        if self._pending_confirm is not None:
+            key = getattr(event, "key", "")
+            if key in ("y", "Y"):
+                self._answer_confirm(True)
+                event.stop()
+            elif key in ("n", "N", "escape"):
+                self._answer_confirm(False)
+                event.stop()
+            return
         if self._busy:
             return
         inp = self.query_one("#in", Input)

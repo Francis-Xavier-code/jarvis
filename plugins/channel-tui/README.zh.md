@@ -11,7 +11,7 @@ reply (no more "printf mess").
 
 * streamed assistant text in a scrollable output panel
 * tool calls and completions shown inline (⚙ / ✓ / ✗ + duration)
-* confirmation prompts as a modal dialog (Yes/No buttons)
+* confirmation prompts answered inline in the input row (y/N on keyboard - no popup over the output)
 * single-line input with up/down history and `\` continuation
 * busy state in the header; input typed while busy is queued
 * ctrl+d quit, ctrl+l clear output, `/help` `/clear` `/exit`
