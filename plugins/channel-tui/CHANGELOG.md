@@ -10,6 +10,9 @@ plugin.log_change tool to do this automatically.
 ### Changed
 - feat(tui): braille spinner frames, tool-row spinner now animates (was stuck on frame 1) with live elapsed seconds, ✓/✗ completion marks, rounded input with ❯ prefix and focus highlight (by JARVIS <jarvis@jarvis.local>)
 
+### Fixed
+- "❯ " input prompt renders via a Horizontal container + Static - textual 8.x Input has no prefix kwarg, which crashed startup with TypeError in compose (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.9] - 2026-08-15
 
 ### Changed

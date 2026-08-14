@@ -27,7 +27,7 @@ from .ui import render_big, shimmer_line
 # ---- soft dependency ----
 try:
     from textual.app import App, ComposeResult
-    from textual.containers import VerticalScroll
+    from textual.containers import Horizontal, VerticalScroll
     from textual.screen import Screen
     from textual.theme import Theme
     from textual.widgets import Footer, Header, Input, Static
@@ -244,7 +244,7 @@ class _JarvisApp(App):
         content-align: left middle;
         color: $primary;
     }
-    #in {
+    #input-row {
         dock: bottom;
         height: 3;
         margin: 0 1 1 1;
@@ -252,9 +252,21 @@ class _JarvisApp(App):
         background: $surface;
         border: round $primary;
     }
-    #in:focus {
+    #input-row:focus-within {
         border: round $accent;
         background: $panel;
+    }
+    #input-prompt {
+        width: auto;
+        content-align: center middle;
+        color: $primary;
+        margin-right: 1;
+    }
+    #in {
+        border: none;
+        background: transparent;
+        height: 100%;
+        padding: 0;
     }
     #brand {
         height: auto;
@@ -319,7 +331,9 @@ class _JarvisApp(App):
         yield Header(show_clock=True)
         yield VerticalScroll(id="chat")
         yield Static("", id="status")
-        yield Input(id="in", prefix="❯ ", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
+        with Horizontal(id="input-row"):
+            yield Static("❯ ", id="input-prompt")
+            yield Input(id="in", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
         yield Footer()
 
     def on_mount(self) -> None:
