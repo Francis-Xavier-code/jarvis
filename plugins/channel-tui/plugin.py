@@ -362,11 +362,27 @@ class _JarvisApp(App):
         self.push_screen(_SplashScreen())
 
     def _render_history(self, m) -> None:
-        """Render one persisted history message at startup (no re-animation)."""
+        """Render one persisted history message at startup (no re-animation).
+
+        Assistant messages go through the SAME built-in markdown renderer as
+        live streaming (headings/lists/bold/code), so replayed conversations
+        look identical to the live flow.
+        """
         if m.role == "user":
             self._new_message(f"{_SECONDARY}you >[/] {_esc(m.content)}", "user-msg")
         elif m.role == "assistant" and m.content:
-            self._new_message(f"{_PRIMARY}jarvis >[/] {_esc(m.content)}", "assistant-msg")
+            # render historically stored text through the md pipeline
+            self._assistant_buf = []
+            self._assistant_prefix = False
+            self._md_part = ""
+            self._in_code = False
+            for ln in m.content.split("\n"):
+                self._assistant_buf.append(self._md_line(ln))
+            self._refresh_assistant()
+            # never let an unclosed code fence from history leak into live
+            # streaming state
+            self._in_code = False
+            self._md_part = ""
         elif m.role == "tool":
             first = (m.content or "").strip().split("\n", 1)[0]
             self._new_message(f"{_DIM}  ⚙ {m.name or 'tool'}: {_short(first, 60)}[/]", "tool-msg")
