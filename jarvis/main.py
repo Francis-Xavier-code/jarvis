@@ -2,6 +2,7 @@
 
 Subcommands:
   bootstrap   auto-clone every repo in plugin-sources.toml, then load plugins
+              (one-shot setup; use `jarvis watch` to keep hot-reload running)
   install     clone one git repo into plugins/ and hot-load it (on demand)
   chat        run the terminal channel (REPL); hot-reload watcher runs in background
   watch       load plugins and run ONLY the hot-reload watcher (no channel)
@@ -52,8 +53,7 @@ def bootstrap() -> None:
     if kernel.manager._load_errors:
         for name, err in kernel.manager._load_errors.items():
             click.echo(f"[jarvis] plugin '{name}' error: {err}", err=True)
-    kernel.start_hot_reload_watcher()
-    click.echo("[jarvis] hot-reload watcher started (edits reload without restart)")
+    click.echo("[jarvis] bootstrap complete — run `jarvis chat` or `jarvis watch` to start")
 
 
 @cli.command()
