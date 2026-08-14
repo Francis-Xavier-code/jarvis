@@ -52,11 +52,11 @@ into one tool table and runs the agent loop.
 ```
 jarvis/             # the microkernel (types · plugin manager · kernel · CLI)
 plugins/            # every capability lives here as a plain subdirectory
-sessions/           # per-conversation history (JSONL) — episodic memory
-memory/             # cross-session facts — long-term memory
 config.toml         # configuration (itself a plugin's data)
 assess/             # design assets (logo · banners)
 tests/              # pytest suite
+# runtime data lives OUTSIDE the repo: ~/Library/Application Support/jarvis/
+#   memory/memory.db — sessions + facts in one SQLite DB (memory-sql plugin)
 ```
 
 ## 🚀 Quickstart
@@ -103,6 +103,7 @@ moment you edit it. **No kernel changes required.**
 |---|---|---|
 | `provider-openai` | provider | the LLM brain (OpenAI-compatible, streaming SSE + tool calls) |
 | `memory-jsonl` | memory | session history + cross-session facts (JSONL) |
+| `memory-sql` | memory | same interface on SQLite (`memory/memory.db`, WAL, auto-migrates legacy JSONL) |
 | `config-core` | config | configuration as a plugin (`get`/`watch`, hot-reload on mtime) |
 | `channel-terminal` | channel | readline REPL with paste detection & multi-line input |
 | `channel-tui` | channel | full-screen textual TUI: md rendering, confirm modals, tool feedback, animated splash |
@@ -110,6 +111,7 @@ moment you edit it. **No kernel changes required.**
 | `agent-tools` | tool | agent identity + file / shell tools |
 | `cache-core` | tool | response caching |
 | `log-stats` | tool | usage & log statistics |
+| `mdcat-render` | tool | markdown → ANSI rendering via the mdcat CLI (`md.render` / `md.render_file`, `render` service for the terminal channel) |
 | `personality` | tool | personality layer |
 | `plugin-self` | tool | self-awareness (`whoami` / `capabilities` / `version` / `config`) |
 | `jarvis-install` | tool | pull plugins from git repos at runtime |
@@ -118,9 +120,11 @@ moment you edit it. **No kernel changes required.**
 ## 🤖 "Is this repo your body?"
 
 **Basically, yes.** The kernel is the skeleton, `plugins/` are the organs,
-`sessions/` is episodic memory, `memory/` is long-term memory, `config.toml`
-is the settings. A running process is JARVIS *awake*; this repo is JARVIS
-*itself* — versioned in git like a genome, and editable while running.
+`config.toml` is the settings — and since the memory-sql switch, **one SQLite
+database (`memory/memory.db`) is the memory center**: sessions and facts live
+there, with legacy JSONL auto-migrated on first startup. A running process is
+JARVIS *awake*; this repo is JARVIS *itself* — versioned in git like a genome,
+and editable while running.
 
 ## 🗺️ Roadmap
 

@@ -24,6 +24,19 @@ plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
   shows the current auto-approve state
 - **docs**: README banner logo (assess/jarvis-logo.png) + refreshed plugin
   inventory; README.zh.md brought to parity with the English version
+- **mdcat-render plugin**: md.render / md.render_file tools + a `render`
+  service wrapping the mdcat CLI (soft dependency; channel-terminal's buffered
+  mode renders replies through it when present)
+- **memory-sql completion**: mem.status / mem.migrate tools, merge migration
+  (older JSONL rows merged into existing sessions in order), migration scans
+  data_dir + JARVIS_DATA + cwd; legacy history (25 sessions, ~2.7k messages)
+  migrated into SQLite
+- **memory-jsonl fix**: DATA_ROOT no longer falls back to cwd when JARVIS_DATA
+  is unset
+- **memory dedupe fix (HTTP 400)**: memory load() no longer dedupes structural
+  rows (tool results / assistant tool_calls) - the old key collapsed consecutive
+  tool rounds, orphaning tool_call_ids and 400-ing the upstream on replay;
+  live terminal session repaired from the JSONL backup (428 msgs, pairing verified)
 
 ## [0.2.0] - 2026-08-15 — agent-ready
 

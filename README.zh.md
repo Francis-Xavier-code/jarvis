@@ -51,11 +51,11 @@ JARVIS 建立在这一条原则上。每个插件是 `plugins/` 下的一个普�
 ```
 jarvis/             # 微内核(types · 插件管理器 · kernel · CLI)
 plugins/            # 所有能力都以普通子目录的形式存在
-sessions/           # 按会话存储的历史(JSONL)—— 情景记忆
-memory/             # 跨会话事实 —— 长期记忆
 config.toml         # 配置(本身就是一个插件的数据)
 assess/             # 设计资源(logo · banner)
 tests/              # pytest 测试套件
+# 运行时数据在仓库之外:~/Library/Application Support/jarvis/
+#   memory/memory.db — 会话 + 事实,同一个 SQLite 库(memory-sql 插件)
 ```
 
 ## 🚀 快速开始
@@ -101,6 +101,7 @@ def setup(kernel: KernelApi) -> None:
 |---|---|---|
 | `provider-openai` | provider | LLM 大脑(OpenAI 兼容,SSE 流式 + 工具调用) |
 | `memory-jsonl` | memory | 会话历史 + 跨会话事实(JSONL) |
+| `memory-sql` | memory | 同样接口换 SQLite(`memory/memory.db`,WAL,自动迁移旧 JSONL) |
 | `config-core` | config | 配置即插件(`get`/`watch`,mtime 热重载) |
 | `channel-terminal` | channel | readline REPL,支持粘贴检测与多行输入 |
 | `channel-tui` | channel | 全屏 textual TUI:md 渲染、确认提示、工具反馈、动画启动页 |
@@ -108,6 +109,7 @@ def setup(kernel: KernelApi) -> None:
 | `agent-tools` | tool | agent 身份 + 文件 / shell 工具 |
 | `cache-core` | tool | 响应缓存 |
 | `log-stats` | tool | 用量与日志统计 |
+| `mdcat-render` | tool | 通过 mdcat CLI 把 Markdown 渲染成 ANSI(`md.render` / `md.render_file`,为终端通道提供 `render` 服务) |
 | `personality` | tool | 人格层 |
 | `plugin-self` | tool | 自我认知(`whoami` / `capabilities` / `version` / `config`) |
 | `jarvis-install` | tool | 运行时从 git 仓库拉取插件 |
@@ -115,9 +117,11 @@ def setup(kernel: KernelApi) -> None:
 
 ## 🤖 "这个仓库就是你的身体?"
 
-**基本如此。** 内核是骨架,`plugins/` 是器官,`sessions/` 是情景记忆,
-`memory/` 是长期记忆,`config.toml` 是设置。运行中的进程是 JARVIS *清醒*;
-这个仓库就是 JARVIS *本身* —— 像基因组一样用 git 做版本管理,而且可以运行中修改。
+**基本如此。** 内核是骨架,`plugins/` 是器官,`config.toml` 是设置——而且自从
+换成 memory-sql 后,**一个 SQLite 数据库(`memory/memory.db`)就是记忆中枢**:
+会话与事实都存在里面,旧 JSONL 数据首次启动时自动迁移。运行中的进程是
+JARVIS *清醒*;这个仓库就是 JARVIS *本身* —— 像基因组一样用 git 做版本管理,
+而且可以运行中修改。
 
 ## 🗺️ 路线图
 

@@ -43,6 +43,11 @@ max_tool_rounds = 4   # tool-call rounds per turn; after this the kernel runs on
                       # wind-down request so multi-step tasks still get their final
                       # answer, then reports the limit if the model keeps calling tools
 
+# ---- markdown rendering (mdcat-render plugin, optional) ----
+# Requires the mdcat binary: brew install mdcat  (or: cargo install mdcat)
+[mdcat]
+theme = "catppuccin-mocha"   # optional: any mdcat/bat theme name
+
 # ---- personality: the assistant's persona (injected into every turn) ----
 [personality]
 name = "JARVIS"
