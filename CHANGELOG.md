@@ -37,6 +37,20 @@ plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
   rows (tool results / assistant tool_calls) - the old key collapsed consecutive
   tool rounds, orphaning tool_call_ids and 400-ing the upstream on replay;
   live terminal session repaired from the JSONL backup (428 msgs, pairing verified)
+- **kernel.history(session)**: public accessor so channels can replay persisted
+  history at startup (used by the TUI's startup replay)
+- **TUI class-structure fix**: helpers inserted mid-class by a concurrent edit
+  swallowed _JarvisApp's methods (startup AttributeError on _confirm_wait) -
+  moved to module scope, 42 methods restored
+- **self-modification guardrails**: agent-tools fs.* pre-validate .py/.toml
+  syntax and write atomically; .jarvis-frozen marks kernel/ + the plugin spec
+  as confirm-gated; the plugin manager now compile-checks entries and skips
+  reloads while a file is still changing; `jarvis doctor` verifies the
+  guardrails are in place
+- **chain-reaction toolkit**: `jarvis check` (one-command regression gate),
+  `jarvis snapshot` / `--undo` (git checkpoints + instant rollback), and a
+  `.jarvis-maintenance` write-lock (single-writer rule); workflow documented
+  in docs/DEVELOPMENT.md
 
 ## [0.2.0] - 2026-08-15 — agent-ready
 

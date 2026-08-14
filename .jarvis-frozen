@@ -1,0 +1,14 @@
+# JARVIS self-modification guardrails
+#
+# Paths listed here (exact, or a directory prefix) require user confirmation
+# before the agent-tools fs.write / fs.edit / fs.append tools modify them.
+# The confirm gate is the hard wall - edit this file yourself to adjust.
+#
+# jarvis/  -> the whole kernel package (spine): syntax-checked + confirm-gated
+# docs/    -> the plugin contract: changing the spec needs a human
+# .jarvis-frozen itself -> JARVIS cannot quietly unprotect itself
+
+jarvis/
+docs/PLUGIN_SPEC.md
+docs/PLUGIN_SPEC.zh.md
+.jarvis-frozen

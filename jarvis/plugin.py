@@ -19,6 +19,7 @@ import hashlib
 import importlib.util
 import os
 import sys
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -194,6 +195,16 @@ class PluginManager:
             sys.modules.pop(m, None)
 
     def _load_plugin(self, plugin: Plugin) -> bool:
+        # Pre-validate the entry source before importing: a half-written or
+        # syntactically broken file must never get a chance to exec (and must
+        # not leave a broken module in sys.modules).
+        entry_path = plugin.path / plugin.manifest.entry
+        if entry_path.suffix == ".py":
+            try:
+                compile(entry_path.read_text(encoding="utf-8"), str(entry_path), "exec")
+            except Exception as exc:  # noqa: BLE001 - SyntaxError etc.
+                self._load_errors[plugin.name] = f"entry has a syntax error: {exc}"
+                return False
         try:
             self.kernel._set_active(plugin.name)
             mod_name = self._module_name(plugin.name)
@@ -268,16 +279,26 @@ class PluginManager:
             plugin._last_signature = plugin.signature()
         return ok
 
-    def check_hot_reload(self) -> list[str]:
-        """Find plugins whose content changed; reload them. Returns reloaded names."""
+    def check_hot_reload(self, stable_delay: float = 0.3) -> list[str]:
+        """Find plugins whose content changed; reload them. Returns reloaded names.
+
+        A change is only acted on once the content has been STABLE for
+        ``stable_delay`` seconds (two consecutive identical signatures), so a
+        mid-write file (non-atomic editors) is never reloaded half-written.
+        """
         reloaded: list[str] = []
         for name, plugin in list(self.plugins.items()):
             if not plugin.manifest.hot_reload:
                 continue
             sig = plugin.signature()
-            if sig != plugin._last_signature:
-                if self.reload(name):
-                    reloaded.append(name)
+            if sig == plugin._last_signature:
+                continue
+            if stable_delay > 0:
+                time.sleep(stable_delay)
+                if plugin.signature() != sig:
+                    continue  # still being written: wait for the next poll
+            if self.reload(name):
+                reloaded.append(name)
         return reloaded
 
     def load_one(self, name: str) -> "Plugin | None":

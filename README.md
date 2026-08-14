@@ -68,7 +68,12 @@ uv run jarvis chat                     # terminal REPL
 uv run jarvis bootstrap                # list loaded plugins + load errors
 uv run jarvis doctor                   # environment checks
 uv run jarvis install <git-url>        # pull a plugin repo, hot-load it
+uv run jarvis check                    # one-command regression gate (compile+tests+doctor)
+uv run jarvis snapshot "msg"           # git checkpoint; --undo reverts it
 ```
+
+> **Fixing JARVIS?** See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — the
+> golden loop is `jarvis check` → fix → `jarvis check` → `jarvis snapshot`.
 
 ## 🔌 Write a plugin
 

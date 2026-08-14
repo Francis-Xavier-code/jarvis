@@ -133,6 +133,15 @@ def _short(value: str, limit: int = 48) -> str:
     return value[: limit - 3] + "..."
 
 
+_DSML_CLEAN_RE = re.compile(r"<[｜|]*tool_calls[｜|]*>.*?<[｜|]*/tool_calls[｜|]*>", re.S)
+
+
+def _strip_dsml(text: str) -> str:
+    """Remove raw <tool_calls> DSL blocks that older kernels persisted as
+    literal text, so replayed history never shows the raw markers."""
+    return _DSML_CLEAN_RE.sub("", text)
+
+
 def _tool_label(
     name: str,
     arguments: dict,
@@ -372,11 +381,14 @@ class _JarvisApp(App):
             self._new_message(f"{_SECONDARY}you >[/] {_esc(m.content)}", "user-msg")
         elif m.role == "assistant" and m.content:
             # render historically stored text through the md pipeline
+            content = _strip_dsml(m.content)
+            if not content.strip():
+                return
             self._assistant_buf = []
             self._assistant_prefix = False
             self._md_part = ""
             self._in_code = False
-            for ln in m.content.split("\n"):
+            for ln in content.split("\n"):
                 self._assistant_buf.append(self._md_line(ln))
             self._refresh_assistant()
             # never let an unclosed code fence from history leak into live

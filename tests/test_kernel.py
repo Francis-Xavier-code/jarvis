@@ -144,6 +144,60 @@ def test_hot_reload_on_file_change(kernel: Kernel) -> None:
     # tool table still intact after reload
     assert "demo.ping" in kernel._tools
 
+
+def test_hot_reload_skips_unstable_file(kernel: Kernel) -> None:
+    """A file that keeps changing is not reloaded until it settles - a
+    mid-write file (non-atomic editors) must never be picked up."""
+    import os
+    import threading
+    import time
+
+    plugin_dir = kernel.manager.plugins["provider-stub"].path
+    py = plugin_dir / "plugin.py"
+    original = py.read_text()
+    py.write_text(original + "\n# change one\n")
+    os.utime(py, None)
+
+    def _changer() -> None:
+        # rewrite DURING the stability window of the running check
+        time.sleep(0.02)
+        py.write_text(original + "\n# change two\n")
+        os.utime(py, None)
+
+    t = threading.Thread(target=_changer)
+    t.start()
+    reloaded = kernel.manager.check_hot_reload(stable_delay=0.05)
+    t.join()
+    assert "provider-stub" not in reloaded  # skipped: still changing
+    time.sleep(0.06)  # let it settle
+    reloaded2 = kernel.manager.check_hot_reload(stable_delay=0.0)
+    assert "provider-stub" in reloaded2
+
+
+def test_plugin_with_syntax_error_never_imports(kernel: Kernel, tmp_path: Path) -> None:
+    """A syntactically broken plugin entry is recorded as a load error and is
+    never imported (compile pre-check) - it cannot brick the kernel."""
+    plugins = tmp_path / "broken-plugins"
+    plugins.mkdir()
+    d = plugins / "broken"
+    d.mkdir()
+    (d / "plugin.toml").write_text(
+        "[plugin]\nname = \"broken\"\nkind = \"tool\"\nversion = \"0.1.0\"\nentry = \"plugin.py\"\nhot_reload = true\n"
+    )
+    (d / "plugin.py").write_text("def broken(:\n    pass\n")
+    from jarvis.kernel import Kernel
+
+    k = Kernel(plugins_dir=str(plugins), data_dir=str(tmp_path / "data"))
+    k.load()
+    assert "broken" in k.manager._load_errors
+    assert "syntax error" in k.manager._load_errors["broken"]
+    assert "jarvis_plugin_broken" not in __import__("sys").modules
+    # fixing the file lets it load on the next check
+    (d / "plugin.py").write_text("from jarvis.types import KernelApi\ndef setup(kernel: KernelApi) -> None: pass\n")
+    reloaded = k.manager.check_hot_reload(stable_delay=0.0)
+    assert "broken" in reloaded
+    assert "broken" not in k.manager._load_errors
+
 def test_provider_failure_returns_error_text(kernel: Kernel) -> None:
     """A failing provider must degrade to error text, not crash the caller."""
     class _BadProvider:

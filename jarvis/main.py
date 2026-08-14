@@ -14,6 +14,9 @@ Subcommands:
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import click
@@ -181,12 +184,106 @@ def doctor() -> None:
     check("plugin CHANGELOGs present", not missing_cl, ", ".join(missing_cl) if missing_cl else f"{n_plugins} plugins")
     check("plugin versions match changelogs", not version_mismatch, "; ".join(version_mismatch) if version_mismatch else "")
 
+    # self-modification guardrails
+    frozen = Path(".jarvis-frozen")
+    if frozen.exists():
+        entries = [l for l in frozen.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+        check(f"self-modification guardrails (.jarvis-frozen: {len(entries)} paths)", True, "kernel/contract writes need y/N confirmation")
+    else:
+        check("self-modification guardrails (.jarvis-frozen)", False, "missing - JARVIS can freely rewrite core files")
+
     click.echo("")
     if ok:
         click.echo("JARVIS looks healthy")
     else:
         click.echo("JARVIS has problems — see [!!] items above")
         raise click.exceptions.Exit(1)
+
+@cli.command()
+def check() -> None:
+    """One-command regression gate: compile every .py/.toml, run the test
+    suite and doctor. Exits non-zero on any failure. Run it BEFORE and AFTER
+    every fix so a fix never chains into the next bug unverified."""
+    ok = True
+    root = Path.cwd()
+
+    broken = []
+    for p in root.rglob("*.py"):
+        if any(seg in (".venv", "__pycache__", ".git") for seg in p.parts):
+            continue
+        try:
+            compile(p.read_text(encoding="utf-8"), str(p), "exec")
+        except Exception as exc:  # noqa: BLE001
+            broken.append(f"{p.relative_to(root)}: {exc}")
+            ok = False
+    click.echo(f"[{'ok' if not broken else '!!'}] compile: {len(broken)} broken" + ("" if not broken else f" - {broken[0]}"))
+
+    bad_toml = []
+    for p in [*root.glob("plugins/*/plugin.toml"), root / "plugin-sources.toml"]:
+        try:
+            tomllib.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            bad_toml.append(f"{p.name}: {exc}")
+            ok = False
+    click.echo(f"[{'ok' if not bad_toml else '!!'}] toml: {len(bad_toml)} broken" + ("" if not bad_toml else f" - {bad_toml[0]}"))
+
+    click.echo("[...] running pytest")
+    res = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q"],
+        capture_output=True,
+        text=True,
+    )
+    tail = (res.stdout.strip().splitlines() or ["(no output)"])[-1]
+    if res.returncode != 0:
+        ok = False
+        click.echo(f"[!!] tests FAILED: {tail}")
+        for line in (res.stdout + res.stderr).strip().splitlines()[-6:]:
+            click.echo(f"      {line}")
+    else:
+        click.echo(f"[ok] tests: {tail}")
+
+    click.echo("[...] running doctor")
+    doc = subprocess.run([sys.executable, "-m", "jarvis.main", "doctor"], capture_output=True, text=True)
+    if doc.returncode != 0:
+        ok = False
+        click.echo("[!!] doctor FAILED")
+    else:
+        click.echo("[ok] doctor")
+
+    if ok:
+        click.echo("CHECK PASSED - safe to snapshot/commit")
+    else:
+        click.echo("CHECK FAILED - fix before snapshotting")
+        raise click.exceptions.Exit(1)
+
+
+@cli.command()
+@click.option("--undo", is_flag=True, help="Revert the last checkpoint (git reset --hard HEAD~1)")
+@click.argument("message", required=False)
+def snapshot(undo: bool, message: str) -> None:
+    """Create a git checkpoint (add + commit) or, with --undo, revert the last
+    one. Every green fix should be snapshot right away, so a later bad fix is
+    one jarvis snapshot --undo away instead of a chain reaction."""
+    if undo:
+        res = subprocess.run(["git", "reset", "--hard", "HEAD~1"], capture_output=True, text=True)
+        if res.returncode != 0:
+            click.echo(f"[!!] undo failed: {(res.stderr or res.stdout).strip()}", err=True)
+            raise click.exceptions.Exit(1)
+        click.echo("[ok] reverted to the previous checkpoint")
+        return
+    if not message:
+        click.echo("usage: jarvis snapshot <message>  |  jarvis snapshot --undo", err=True)
+        raise click.exceptions.Exit(1)
+    subprocess.run(["git", "add", "-A"], capture_output=True, text=True)
+    res = subprocess.run(
+        ["git", "commit", "-m", f"checkpoint: {message}"],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        click.echo(f"[!!] commit failed: {(res.stderr or res.stdout).strip()}", err=True)
+        raise click.exceptions.Exit(1)
+    click.echo(f"[ok] checkpoint saved: {message}")
 
 
 @cli.command()

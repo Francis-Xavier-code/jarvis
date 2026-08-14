@@ -115,6 +115,10 @@ class KernelApi:
         """Ask the user to approve an assistant-initiated action."""
         return self._kernel.confirm(prompt)
 
+    def confirm_hard(self, prompt: str) -> bool:
+        """Ask the user, never auto-approved (frozen-path writes)."""
+        return self._kernel.confirm_hard(prompt)
+
     @property
     def data_dir(self) -> str:
         """Kernel data directory (backups, history, sessions...)."""

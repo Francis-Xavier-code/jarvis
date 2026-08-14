@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.11] - 2026-08-15
+
+### Fixed
+- restore _JarvisApp class structure: _DSML_CLEAN_RE/_strip_dsml were inserted at module level inside the class body, swallowing every method after on_mount (incl. _confirm_wait) as nested functions - startup crashed with AttributeError; helpers moved to module scope, kernel.history() added for the startup replay feature (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.10] - 2026-08-15
 
 ### Changed

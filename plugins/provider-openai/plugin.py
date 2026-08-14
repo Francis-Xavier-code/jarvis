@@ -89,12 +89,13 @@ def _dsml_split(buf: str) -> "tuple[str, str, list]":
         return buf, "", []
     head = buf[: m.start()]
     rest = buf[m.end():]
-    close_tag = "</tool_calls>" if "tool_calls>" in m.group(0) else "<｜｜/tool_calls｜｜>"
-    end = rest.find(close_tag)
-    if end < 0:
+    # closing tag: any separator variant (</tool_calls>, <||/tool_calls||>,
+    # <｜｜/tool_calls｜｜>) - pick whichever comes first
+    close_m = re.search(r"<[｜|]*/tool_calls[｜|]*>", rest)
+    if not close_m:
         return head, buf[m.start():], []  # inside an open block: hold back
-    block = rest[:end]
-    tail = rest[end + len(close_tag):]
+    block = rest[: close_m.start()]
+    tail = rest[close_m.end():]
     return head + tail, "", _dsml_parse_invokes(block)
 
 

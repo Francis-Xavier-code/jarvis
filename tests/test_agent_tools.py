@@ -199,4 +199,97 @@ def test_plugin_log_change_patch_bump(tools: Kernel, tmp_path: Path) -> None:
     assert "### Fixed" in changelog
 
 
+# ---- self-modification guardrails ----
+
+
+def test_fs_write_refuses_invalid_python(tools: Kernel, tmp_path: Path) -> None:
+    w = _h(tools, "fs.write")
+    out = w("bad.py", "def broken(:\n    pass\n")
+    assert "refused" in out and "syntax error" in out
+    assert not (tmp_path / "bad.py").exists()
+
+
+def test_fs_write_accepts_valid_python(tools: Kernel, tmp_path: Path) -> None:
+    w, rd = _h(tools, "fs.write"), _h(tools, "fs.read")
+    assert "wrote" in w("ok.py", "x = 1\n")
+    assert rd("ok.py") == "x = 1\n"
+
+
+def test_fs_write_validates_toml(tools: Kernel) -> None:
+    w = _h(tools, "fs.write")
+    assert "refused" in w("bad.toml", "[unclosed\n")  # TOMLDecodeError
+    assert "wrote" in w("good.toml", "[plugin]\nname = \"x\"\n")
+
+
+def test_fs_edit_refuses_invalid_result(tools: Kernel, tmp_path: Path) -> None:
+    w, ed, rd = _h(tools, "fs.write"), _h(tools, "fs.edit"), _h(tools, "fs.read")
+    w("m.py", "x = 1\n")
+    out = ed("m.py", "x = 1", "def broken(:")
+    assert "refused" in out
+    assert rd("m.py") == "x = 1\n"  # unchanged
+
+
+def test_fs_append_refuses_invalid_result(tools: Kernel, tmp_path: Path) -> None:
+    w, ap, rd = _h(tools, "fs.write"), _h(tools, "fs.append"), _h(tools, "fs.read")
+    w("a.py", "x = 1\n")
+    out = ap("a.py", "def broken(:\n")
+    assert "refused" in out
+    assert rd("a.py") == "x = 1\n"
+
+
+def test_atomic_write_leaves_no_temp_files(tools: Kernel, tmp_path: Path) -> None:
+    w = _h(tools, "fs.write")
+    w("t.txt", "hello")
+    leftovers = [p for p in tmp_path.rglob("*.jarvis-tmp")]
+    assert leftovers == []
+
+
+def test_frozen_path_requires_confirmation(tools: Kernel, tmp_path: Path) -> None:
+    (tmp_path / ".jarvis-frozen").write_text("core/\n", encoding="utf-8")
+    (tmp_path / "core").mkdir()
+    w = _h(tools, "fs.write")
+    tools.confirm_action = lambda prompt: False
+    out = w("core/kernel.py", "x = 1\n")
+    assert "frozen" in out and "not confirmed" in out
+    assert not (tmp_path / "core" / "kernel.py").exists()
+    tools.confirm_action = lambda prompt: True
+    assert "wrote" in w("core/kernel.py", "x = 1\n")
+
+
+def test_frozen_file_itself_protected(tools: Kernel, tmp_path: Path) -> None:
+    (tmp_path / ".jarvis-frozen").write_text(".jarvis-frozen\n", encoding="utf-8")
+    w = _h(tools, "fs.write")
+    tools.confirm_action = lambda prompt: False
+    out = w(".jarvis-frozen", "# tampered\n")
+    assert "frozen" in out
+    assert "# tampered" not in (tmp_path / ".jarvis-frozen").read_text(encoding="utf-8")
+
+
+def test_maintenance_lock_refuses_all_writes(tools: Kernel, tmp_path: Path) -> None:
+    """With .jarvis-maintenance present, fs.* refuses even non-frozen writes
+    (single-writer rule: a running JARVIS must not clobber the human)."""
+    (tmp_path / ".jarvis-maintenance").write_text("refactoring memory", encoding="utf-8")
+    w, ed = _h(tools, "fs.write"), _h(tools, "fs.edit")
+    out = w("note.txt", "hello")
+    assert "maintenance" in out and "refactoring memory" in out
+    assert not (tmp_path / "note.txt").exists()
+    (tmp_path / ".jarvis-maintenance").unlink()
+    assert "wrote" in w("note.txt", "hello")
+
+
+def test_frozen_gate_survives_auto_approve(tools: Kernel, tmp_path: Path) -> None:
+    """auto_approve=true green-lights bash etc. but must NEVER bypass the
+    frozen gate - protected core files need an explicit human yes."""
+    (tmp_path / ".jarvis-frozen").write_text("core/\n", encoding="utf-8")
+    (tmp_path / "core").mkdir()
+    w = _h(tools, "fs.write")
+    tools.confirm_action = lambda prompt: False
+    tools.set_config({"auto_approve": True, "agent-identity": {"sign_edits": False}})
+    out = w("core/kernel.py", "x = 1\n")
+    assert "frozen" in out and "not confirmed" in out
+    assert not (tmp_path / "core" / "kernel.py").exists()
+    # a non-frozen write IS auto-approved under auto_approve
+    assert "wrote" in w("other.py", "y = 2\n")
+
+
 

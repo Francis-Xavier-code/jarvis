@@ -107,6 +107,20 @@ class Kernel:
         except Exception:  # noqa: BLE001
             return False
 
+    def confirm_hard(self, prompt: str) -> bool:
+        """Ask the user, NEVER bypassed by ``auto_approve``.
+
+        Used for writes to frozen paths (.jarvis-frozen): auto_approve may
+        green-light bash commands or installs, but protected core files must
+        always get an explicit human yes.
+        """
+        if self.confirm_action is None:
+            return False
+        try:
+            return bool(self.confirm_action(prompt))
+        except Exception:  # noqa: BLE001
+            return False
+
     @staticmethod
     def _default_confirm_install(prompt: str) -> bool:
         """Interactive y/N confirmation for assistant-initiated actions.
@@ -230,6 +244,15 @@ class Kernel:
     def get_service(self, kind: str):
         """Public accessor for a registered plugin service (channels, tools)."""
         return self._services.get(kind)
+
+    def history(self, session: str) -> list[ChatMessage]:
+        """Load a session's persisted history (channels replay it on startup)."""
+        if self._memory_svc is None:
+            return []
+        try:
+            return self._memory_svc.load(session)
+        except Exception:  # noqa: BLE001
+            return []
 
     def run_hot_reload_check(self) -> list[str]:
         return self.manager.check_hot_reload()

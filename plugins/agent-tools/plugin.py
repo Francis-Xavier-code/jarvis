@@ -163,6 +163,19 @@ def _resolve(kernel: KernelApi, raw: str, write: bool) -> Path:
         in_root = p == root or str(p).startswith(str(root) + os.sep)
     if p.name == "config.toml":
         raise PermissionError("config.toml holds secrets and is off-limits")
+    if write:
+        maint = _maintenance_note()
+        if maint:
+            raise PermissionError(
+                f"maintenance mode ({maint}) - refuse concurrent writes: {p}"
+            )
+    if write and _is_frozen(p):
+        # frozen writes must NEVER be auto-approved (auto_approve=true would
+        # otherwise bypass the gate) - confirm_hard always asks the human.
+        if not kernel.confirm_hard(
+            f"[frozen] {p} is protected (.jarvis-frozen) - confirm modification?"
+        ):
+            raise PermissionError(f"frozen path not confirmed: {p}")
     if not in_root:
         if not kernel.confirm(f"[fs] access outside project root: {p}?"):
             raise PermissionError(f"path outside project root not confirmed: {p}")
@@ -196,6 +209,85 @@ def _latest_backup(kernel: KernelApi, p: Path) -> "Path | None":
     key = hashlib.sha256(str(p.resolve()).encode()).hexdigest()[:12]
     candidates = sorted((Path(kernel.data_dir) / "backups" / key).glob(f"*_{p.name}"))
     return candidates[-1] if candidates else None
+
+
+# ---- self-modification guardrails (JARVIS editing JARVIS) ----
+# JARVIS can edit its own files - that is the point - but a bad edit must
+# never be able to brick startup or corrupt the kernel contract. Three
+# mechanisms: syntax pre-validation, atomic writes, and a frozen-path list.
+
+# Files whose NEW content is validated before it is allowed on disk.
+_SYNTAX_CHECK_SUFFIXES = {".py", ".toml"}
+
+# Paths (relative to the project root) that require user confirmation before
+# fs.write/edit/append touches them: a bare name matches exactly, a trailing
+# "/" or a directory prefix protects everything under it.
+_FROZEN_FILE = ".jarvis-frozen"
+
+# When this file exists at the project root, fs.* writes are refused: the
+# human (or another process) is working, and concurrent edits are the #1
+# cause of chain reactions. Content is shown in the refusal message.
+_MAINTENANCE_FILE = ".jarvis-maintenance"
+
+
+def _maintenance_note() -> "str | None":
+    f = _root() / _MAINTENANCE_FILE
+    if f.exists():
+        return (f.read_text(encoding="utf-8").strip() or "maintenance in progress")
+    return None
+
+
+def _check_syntax(p: Path, content: str) -> "str | None":
+    """Validate the NEW content of a source/manifest file BEFORE writing.
+
+    Returns an error message, or None when valid. Guards against JARVIS
+    writing itself into a state that cannot parse (startup crashes)."""
+    if p.suffix not in _SYNTAX_CHECK_SUFFIXES:
+        return None
+    try:
+        if p.suffix == ".py":
+            compile(content, str(p), "exec")
+        else:
+            tomllib.loads(content)
+    except Exception as exc:  # noqa: BLE001 - SyntaxError / TOMLDecodeError
+        return f"{p.suffix} syntax error in new content: {exc}"
+    return None
+
+
+def _atomic_write(p: Path, content: str) -> None:
+    """Write atomically (same-dir temp file + rename) so hot-reload watchers
+    never observe a half-written file."""
+    tmp = p.with_name(f".{p.name}.jarvis-tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _frozen_entries() -> list[str]:
+    """Protected paths from .jarvis-frozen (one per line; # comments)."""
+    f = _root() / _FROZEN_FILE
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            out.append(line)
+    return out
+
+
+def _is_frozen(p: Path) -> bool:
+    """True when a write to p must pass the user-confirmation gate."""
+    root = _root()
+    try:
+        rel = p.relative_to(root)
+    except ValueError:
+        return False
+    rel_str = rel.as_posix()
+    for entry in _frozen_entries():
+        entry = entry.strip("/")
+        if rel_str == entry or rel_str.startswith(entry + "/"):
+            return True
+    return False
 
 
 def setup(kernel: KernelApi) -> None:
@@ -259,10 +351,13 @@ def setup(kernel: KernelApi) -> None:
             p = _resolve(kernel, path, write=True)
         except PermissionError as exc:
             return f"[fs] {exc}"
+        err = _check_syntax(p, content)
+        if err:
+            return f"[fs] refused: {err}"
         try:
             _backup(kernel, p)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
+            _atomic_write(p, content)
         except Exception as exc:  # noqa: BLE001
             return f"[fs] write failed: {exc}"
         _sign_file(kernel, p)
@@ -287,8 +382,12 @@ def setup(kernel: KernelApi) -> None:
         count = content.count(old)
         if count != 1:
             return f"[fs] old matched {count} times (must match exactly once)"
+        new_content = content.replace(old, new, 1)
+        err = _check_syntax(p, new_content)
+        if err:
+            return f"[fs] refused: {err}"
         _backup(kernel, p)
-        p.write_text(content.replace(old, new, 1), encoding="utf-8")
+        _atomic_write(p, new_content)
         _sign_file(kernel, p)
         return f"[fs] replaced in {p}"
 
@@ -303,10 +402,17 @@ def setup(kernel: KernelApi) -> None:
         except PermissionError as exc:
             return f"[fs] {exc}"
         try:
+            existing = p.read_text(encoding="utf-8") if p.exists() else ""
+        except Exception as exc:  # noqa: BLE001
+            return f"[fs] read failed: {exc}"
+        new_content = existing + content
+        err = _check_syntax(p, new_content)
+        if err:
+            return f"[fs] refused: {err}"
+        try:
             _backup(kernel, p)
             p.parent.mkdir(parents=True, exist_ok=True)
-            with p.open("a", encoding="utf-8") as fh:
-                fh.write(content)
+            _atomic_write(p, new_content)
         except Exception as exc:  # noqa: BLE001
             return f"[fs] append failed: {exc}"
         _sign_file(kernel, p)

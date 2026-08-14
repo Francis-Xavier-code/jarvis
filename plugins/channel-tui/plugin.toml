@@ -1,7 +1,7 @@
 [plugin]
 name = "channel-tui"
 kind = "channel"
-version = "0.6.10"
+version = "0.6.11"
 entry = "plugin.py"
 hot_reload = true
 dependencies = []

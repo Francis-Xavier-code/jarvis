@@ -67,7 +67,12 @@ uv run jarvis chat                     # 终端 REPL
 uv run jarvis bootstrap                # 列出已加载插件 + 加载错误
 uv run jarvis doctor                   # 环境体检
 uv run jarvis install <git-url>        # 拉取插件仓库并热加载
+uv run jarvis check                    # 一键回归门(编译+测试+体检)
+uv run jarvis snapshot "msg"           # git 检查点;--undo 回滚
 ```
+
+> **要修 JARVIS 自己?** 见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)——黄金循环:
+> `jarvis check` → 修复 → `jarvis check` → `jarvis snapshot`。
 
 ## 🔌 写一个插件
 
