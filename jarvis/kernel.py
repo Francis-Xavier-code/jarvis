@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from .plugin import PluginManager
 from .types import (
+    ChatChunk,
     ChatMessage,
     ChatRequest,
     ConfigApi,
@@ -25,6 +26,10 @@ from .types import (
 
 # Config keys whose values should never be surfaced to the assistant.
 _SECRET_HINTS = ("api_key", "token", "secret", "password", "passwd")
+
+# Default conversation-rounds budget sent to the provider (older rounds are
+# trimmed from the request; full history is still persisted). 0/None = no trim.
+DEFAULT_MAX_ROUNDS = 30
 
 
 class Kernel:
@@ -238,6 +243,12 @@ class Kernel:
         injected at the front of every provider request — regenerated each
         round, never persisted — so the assistant always knows its identity,
         loaded plugins and callable tools without having to query for them.
+
+        If a "cache" service is registered (cache-core), the request
+        fingerprint is checked before calling the provider; on a hit the
+        cached chunks replay and the provider (and its tokens) are skipped.
+        Only successful responses (trailing done=True) are stored, so error
+        stubs never poison the cache.
         """
         provider = self._provider_svc
         if provider is None:
@@ -246,20 +257,54 @@ class Kernel:
         history: list[ChatMessage] = []
         if memory is not None:
             history = memory.load(session)
+        old_len = len(history)
         history.append(ChatMessage(role="user", content=user_text))
         self_svc = self._services.get("self")
+        cache_svc = self._services.get("cache")
+        mem_cfg = self._config.get("memory", {})
+        max_rounds = (
+            mem_cfg.get("max_rounds", DEFAULT_MAX_ROUNDS)
+            if isinstance(mem_cfg, dict)
+            else DEFAULT_MAX_ROUNDS
+        )
 
         def _context_messages() -> list[ChatMessage]:
-            """History plus a freshly generated self-awareness system prompt."""
+            """History (trimmed to recent rounds) + a fresh self-awareness prompt.
+
+            Only the pre-turn history is trimmed; the current turn (new user
+            message plus any tool rounds) is always kept intact. Trimming
+            bounds the tokens sent to the provider each round while the full
+            history is still persisted.
+            """
+            msgs = history
+            if max_rounds and old_len:
+                msgs = self._trim_history(history[:old_len], max_rounds) + history[old_len:]
             if self_svc is None:
-                return history
+                return msgs
             try:
                 prompt = self_svc.system_prompt()
             except Exception:  # noqa: BLE001
-                return history
+                return msgs
             if not prompt:
-                return history
-            return [ChatMessage(role="system", content=prompt)] + history
+                return msgs
+            return [ChatMessage(role="system", content=prompt)] + msgs
+
+        def _provider_chunks(req: ChatRequest) -> list[ChatChunk]:
+            """Provider chunks for this request, served from cache when possible."""
+            if cache_svc is not None:
+                cached = cache_svc.get(req)
+                if cached is not None:
+                    return cached
+            try:
+                chunks = list(provider.chat(req))
+            except Exception as exc:  # noqa: BLE001
+                return [ChatChunk(text=f"[error] provider failed: {exc}")]
+            if cache_svc is not None:
+                try:
+                    cache_svc.put(req, chunks)
+                except Exception:  # noqa: BLE001
+                    pass
+            return chunks
 
         MAX_ROUNDS = 4
         reply_text = ""
@@ -275,18 +320,13 @@ class Kernel:
             reply_text = ""
             reasoning_text = ""
             pending_calls: list[ToolCall] = []
-            try:
-                for chunk in provider.chat(req):
-                    if chunk.text:
-                        reply_text += chunk.text
-                    if chunk.reasoning:
-                        reasoning_text += chunk.reasoning
-                    if chunk.tool_call:
-                        pending_calls.append(chunk.tool_call)
-            except Exception as exc:  # noqa: BLE001
-                reply_text = f"[error] provider failed: {exc}"
-                pending_calls = []
-                break
+            for chunk in _provider_chunks(req):
+                if chunk.text:
+                    reply_text += chunk.text
+                if chunk.reasoning:
+                    reasoning_text += chunk.reasoning
+                if chunk.tool_call:
+                    pending_calls.append(chunk.tool_call)
             if not pending_calls:
                 break
             # Store the assistant turn WITH its tool_calls so the history can be
@@ -340,6 +380,38 @@ class Kernel:
             session,
             ChatMessage(role="assistant", content=reply_text, reasoning_content=reasoning_text or None),
         )
+
+    def _trim_history(self, history: list[ChatMessage], max_rounds: int) -> list[ChatMessage]:
+        """Keep only the most recent ``max_rounds`` conversation rounds.
+
+        A round starts at each user message; assistant and tool messages belong
+        to the preceding user round, so tool results are never split from the
+        assistant call that produced them. A system note marks the truncation.
+        Trimming only affects what is sent to the provider — the persisted
+        history stays complete.
+        """
+        if max_rounds <= 0 or len(history) <= 1:
+            return history
+        rounds: list[list[ChatMessage]] = []
+        cur: list[ChatMessage] = []
+        for m in history:
+            if m.role == "user":
+                if cur:
+                    rounds.append(cur)
+                cur = [m]
+            else:
+                cur.append(m)
+        if cur:
+            rounds.append(cur)
+        if len(rounds) <= max_rounds:
+            return history
+        kept = rounds[-max_rounds:]
+        flat = [m for r in kept for m in r]
+        note = ChatMessage(
+            role="system",
+            content=f"[context trimmed: keeping the most recent {max_rounds} rounds]",
+        )
+        return [note] + flat
 
     def _invoke_tool(self, call: ToolCall, tool_table: dict[str, ToolSpec]) -> str:
         """Dispatch a tool call against the round's snapshot (never live tables).

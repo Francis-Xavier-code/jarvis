@@ -17,3 +17,13 @@ model = "deepseek-v4-flash"                # cheap + fast; aggregator has no gem
 [homeassistant]
 ha_base_url = "http://192.168.1.100:8123"
 ha_token = "REPLACE-ME"
+
+# ---- LLM response cache (cache-core) - saves tokens by replaying hits ----
+[cache]
+enabled = true        # set false to bypass entirely
+ttl_seconds = 300     # entry lifetime in seconds
+max_entries = 64      # LRU cap
+
+# ---- memory: conversation budget sent to the provider ----
+[memory]
+max_rounds = 30       # keep the last N user rounds in the request (full history still persisted)

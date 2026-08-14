@@ -249,4 +249,75 @@ def test_state_snapshot_redacts_secret_config_keys(kernel: Kernel) -> None:
     assert "openai_api_key" not in s["config_keys"]
     assert "ha_token" not in s["config_keys"]
 
+def test_chat_consults_cache_service(kernel: Kernel) -> None:
+    """The agent loop asks the cache before the provider and stores the result."""
+    class _SpyCache:
+        kind = "cache"
+
+        def __init__(self):
+            self.gets = 0
+            self.puts = 0
+
+        def get(self, req):
+            self.gets += 1
+            return None
+
+        def put(self, req, chunks):
+            self.puts += 1
+
+    kernel._register_service("cache", _SpyCache(), "test")
+    out = kernel.chat("sess-cache", "hello")
+    assert out == "[echo] hello"
+    svc = kernel._services["cache"]
+    assert svc.gets >= 1
+    assert svc.puts >= 1
+
+def test_trim_history_keeps_recent_rounds(kernel: Kernel) -> None:
+    history = []
+    for i in range(5):
+        history.append(ChatMessage(role="user", content=f"u{i}"))
+        history.append(ChatMessage(role="assistant", content=f"a{i}"))
+    trimmed = kernel._trim_history(history, 2)
+    assert trimmed[0].role == "system"  # truncation note
+    assert [m.content for m in trimmed[1:]] == ["u3", "a3", "u4", "a4"]
+
+
+def test_trim_history_keeps_tool_with_its_round(kernel: Kernel) -> None:
+    history = [
+        ChatMessage(role="user", content="u0"),
+        ChatMessage(role="assistant", content="", tool_calls=[
+            {"id": "c1", "type": "function", "function": {"name": "demo.ping", "arguments": "{}"}}
+        ]),
+        ChatMessage(role="tool", content="pong", name="demo.ping"),
+        ChatMessage(role="user", content="u1"),
+        ChatMessage(role="assistant", content="a1"),
+    ]
+    trimmed = kernel._trim_history(history, 1)
+    # the tool round belongs to u0 and is dropped with it; only u1+a1 survive
+    assert [m.content for m in trimmed[1:]] == ["u1", "a1"]
+
+
+def test_chat_trims_history_before_sending(kernel: Kernel) -> None:
+    kernel.set_config({"memory": {"max_rounds": 1}})
+    seen = {}
+
+    class _Spy:
+        kind = "provider"
+
+        def chat(self, req):
+            seen["n"] = len(req.messages)
+            yield ChatChunk(text="[echo] ok")
+
+    kernel._provider_svc = _Spy()
+    mem = kernel._memory_svc
+    for i in range(3):
+        mem.append("sess-trim", ChatMessage(role="user", content=f"u{i}"))
+        mem.append("sess-trim", ChatMessage(role="assistant", content=f"a{i}"))
+    out = kernel.chat("sess-trim", "fresh")
+    assert out == "[echo] ok"
+    # truncation note + last 1 round (u2,a2) + the new user message
+    assert seen["n"] == 4
+
+
+
 
