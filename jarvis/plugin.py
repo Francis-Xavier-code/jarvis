@@ -142,10 +142,24 @@ class PluginManager:
             return False
 
     def reload(self, name: str) -> bool:
-        """teardown + reload a single plugin. Safe (no full restart)."""
+        """teardown + reload a single plugin. Safe (no full restart).
+
+        Rollback safety: if the reload fails (e.g. the plugin's files were
+        edited into an invalid state), the previously registered tools and
+        services are restored, so a broken edit never kills a capability —
+        fix the file (or restore a backup) and the next change triggers a
+        fresh reload. The broken signature is remembered to avoid hot-looping.
+        """
         plugin = self.plugins.get(name)
         if plugin is None or not plugin.manifest.hot_reload:
             return False
+        # snapshot this plugin's registrations for rollback
+        saved_tools = {k: v for k, v in self.kernel._tools.items() if v.plugin == name}
+        saved_services = {
+            k: v
+            for k, v in self.kernel._services.items()
+            if getattr(v, "_jarvis_plugin", None) == name
+        }
         module = plugin.module
         if module is not None and hasattr(module, "teardown"):
             try:
@@ -154,6 +168,13 @@ class PluginManager:
                 pass
         self.kernel._unregister_plugin(name)
         ok = self._load_plugin(plugin)
+        if not ok:
+            # roll back to the previous registrations so the capability survives
+            for spec in saved_tools.values():
+                self.kernel._register_tool(spec)
+            for kind, impl in saved_services.items():
+                self.kernel._register_service(kind, impl, name)
+            plugin._last_signature = plugin.signature()
         return ok
 
     def check_hot_reload(self) -> list[str]:

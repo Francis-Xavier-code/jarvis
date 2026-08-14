@@ -1,0 +1,10 @@
+[plugin]
+name = "agent-tools"
+kind = "tool"
+version = "0.1.0"
+entry = "plugin.py"
+hot_reload = true
+dependencies = []
+
+[provides]
+tools = ["bash.execute", "fs.read", "fs.write", "fs.edit", "fs.append", "fs.list", "fs.glob", "fs.undo"]

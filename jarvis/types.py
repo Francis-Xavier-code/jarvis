@@ -108,6 +108,15 @@ class KernelApi:
         """Read-only view of kernel state, for self-awareness tools."""
         return self._kernel._state_snapshot()
 
+    def confirm(self, prompt: str) -> bool:
+        """Ask the user to approve an assistant-initiated action."""
+        return self._kernel.confirm(prompt)
+
+    @property
+    def data_dir(self) -> str:
+        """Kernel data directory (backups, history, sessions...)."""
+        return self._kernel.data_dir
+
     @property
     def config(self) -> "ConfigApi":
         return self._kernel.config_api

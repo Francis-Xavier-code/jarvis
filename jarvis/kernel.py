@@ -50,6 +50,21 @@ class Kernel:
         # the install. Defaults to an interactive terminal prompt; tests and
         # headless deployments can replace it (or set it to None to allow).
         self.confirm_install: Callable[[str], bool] | None = self._default_confirm_install
+        # Generic gate for assistant-initiated actions (bash commands, out-of-
+        # project file writes ...). Same interactive default as confirm_install.
+        self.confirm_action: Callable[[str], bool] | None = self._default_confirm_install
+
+    def confirm(self, prompt: str) -> bool:
+        """Ask the user to approve an assistant-initiated action.
+
+        Refuses by default when no handler is configured or it errors.
+        """
+        if self.confirm_action is None:
+            return False
+        try:
+            return bool(self.confirm_action(prompt))
+        except Exception:  # noqa: BLE001
+            return False
 
     @staticmethod
     def _default_confirm_install(git_url: str) -> bool:
