@@ -286,6 +286,7 @@ class Kernel:
         old_len = len(history)
         history.append(ChatMessage(role="user", content=user_text))
         self_svc = self._services.get("self")
+        persona_svc = self._services.get("personality")
         cache_svc = self._services.get("cache")
         mem_cfg = self._config.get("memory", {})
         max_rounds = (
@@ -295,25 +296,38 @@ class Kernel:
         )
 
         def _context_messages() -> list[ChatMessage]:
-            """History (trimmed to recent rounds) + a fresh self-awareness prompt.
+            """System prefix + history (trimmed to recent rounds).
 
-            Only the pre-turn history is trimmed; the current turn (new user
-            message plus any tool rounds) is always kept intact. Trimming
-            bounds the tokens sent to the provider each round while the full
-            history is still persisted.
+            Prefix order: personality -> self-awareness -> remembered facts ->
+            conversation history. Only the pre-turn history is trimmed; the
+            current turn (new user message plus any tool rounds) is always
+            kept intact, bounding tokens sent to the provider each round
+            while the full history is still persisted.
             """
             msgs = history
             if max_rounds and old_len:
                 msgs = self._trim_history(history[:old_len], max_rounds) + history[old_len:]
-            if self_svc is None:
-                return msgs
-            try:
-                prompt = self_svc.system_prompt()
-            except Exception:  # noqa: BLE001
-                return msgs
-            if not prompt:
-                return msgs
-            return [ChatMessage(role="system", content=prompt)] + msgs
+            prefix: list[ChatMessage] = []
+            for svc in (persona_svc, self_svc):
+                if svc is None:
+                    continue
+                try:
+                    prompt = svc.system_prompt()
+                except Exception:  # noqa: BLE001
+                    continue
+                if prompt:
+                    prefix.append(ChatMessage(role="system", content=prompt))
+            # remember cross-session facts, if the memory plugin exposes them
+            if memory is not None and hasattr(memory, "recall_all"):
+                try:
+                    facts = memory.recall_all()
+                except Exception:  # noqa: BLE001
+                    facts = ""
+                if facts:
+                    prefix.append(
+                        ChatMessage(role="system", content=f"Remembered facts:\n{facts}")
+                    )
+            return prefix + msgs
 
         def _provider_chunks(req: ChatRequest) -> list[ChatChunk]:
             """Provider chunks for this request, served from cache when possible."""

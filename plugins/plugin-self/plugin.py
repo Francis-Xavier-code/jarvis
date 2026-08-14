@@ -6,7 +6,9 @@ Two surfaces:
    generated identity + capability summary into every provider request, so
    JARVIS *knows* who it is and what it can do without having to remember to
    query — hot-reload and freshly installed plugins are reflected on the very
-   next turn. The prompt is rebuilt each round and never persisted.
+   next turn. The prompt is rebuilt each round, never persisted, and lists
+   tool *names* only: full descriptions already travel in the tools payload,
+   so repeating them here would waste tokens.
 2. **self.* tools** the LLM (and users) can call for detail on demand:
    self.whoami / self.capabilities / self.version / self.config.
 
@@ -23,20 +25,20 @@ def setup(kernel: KernelApi) -> None:
         kind = "self"
 
         def system_prompt(self) -> str:
-            """One-shot identity + capability summary for a provider request."""
+            """Compact identity + capability summary for a provider request."""
             s = kernel.snapshot()
             model = s["model"] or "(default)"
             plugin_names = ", ".join(p["name"] for p in s["plugins"]) or "(none)"
-            lines = [
-                "You are JARVIS, a microkernel AI assistant where everything is a plugin.",
-                f"Kernel: microkernel v1, plugin spec v1.0. Provider: {s['provider']} (model: {model}).",
-                f"Loaded plugins ({s['n_plugins']}): {plugin_names}.",
-                "Available tools — call the right one instead of guessing:",
-            ]
-            for t in s["tools"]:
-                lines.append(f"- {t['name']}: {t['description'] or '(no description)'}")
-            lines.append("For detail not listed here, call self.capabilities or self.config.")
-            return "\n".join(lines)
+            tool_names = ", ".join(t["name"] for t in s["tools"]) or "(none)"
+            return (
+                "You are JARVIS, a microkernel AI assistant where everything is a plugin. "
+                f"Kernel: microkernel v1, plugin spec v1.0. Provider: {s['provider']} (model: {model}). "
+                f"Loaded plugins ({s['n_plugins']}): {plugin_names}. "
+                f"Callable tools ({s['n_tools']}): {tool_names}. "
+                "Each tool\'s purpose and parameters are described in your tools list; call the right one "
+                "instead of guessing. Use self.capabilities for the full inventory with descriptions, "
+                "self.config for config keys, and mem.recall to revisit remembered facts."
+            )
 
     kernel.service("self", _SelfService())
 
@@ -47,13 +49,16 @@ def setup(kernel: KernelApi) -> None:
     def whoami() -> str:
         s = kernel.snapshot()
         model = s["model"] or "(default)"
+        memory_note = ""
+        if any(t["name"] == "mem.recall" for t in s["tools"]):
+            memory_note = " I have cross-session memory: you can ask me to remember things."
         return (
             "I am JARVIS, a microkernel AI assistant where everything is a "
             "plugin. The kernel itself does almost nothing — providers, memory, "
             "channels, config and tools are all plugins. "
             f"Currently loaded: {s['n_plugins']} plugins, {s['n_tools']} tools. "
             f"Active model provider: {s['provider']} (model={model}). "
-            f"Config keys set: {len(s['config_keys'])}. "
+            f"Config keys set: {len(s['config_keys'])}." + memory_note + " "
             "I can hot-reload any capability without restarting."
         )
 
@@ -70,6 +75,9 @@ def setup(kernel: KernelApi) -> None:
         lines.append("Callable tools (name: description):")
         for t in s["tools"]:
             lines.append(f"  - {t['name']}: {t['description'] or '(no description)'}")
+        if any(t["name"] == "mem.recall" for t in s["tools"]):
+            lines.append("")
+            lines.append("Cross-session memory: mem.store / mem.recall / mem.forget let me remember facts across sessions.")
         return "\n".join(lines)
 
     @kernel.tool("self.version", "Report JARVIS kernel and plugin spec versions")

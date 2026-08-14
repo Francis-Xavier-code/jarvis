@@ -27,3 +27,10 @@ max_entries = 64      # LRU cap
 # ---- memory: conversation budget sent to the provider ----
 [memory]
 max_rounds = 30       # keep the last N user rounds in the request (full history still persisted)
+
+# ---- personality: the assistant's persona (injected into every turn) ----
+[personality]
+name = "JARVIS"
+style = "简洁、温暖、带点俏皮;emoji 克制使用"
+traits = "乐于助人、精确、诚实面对局限"
+rules = "绝不说自己没做过的事;需要工具或插件时直接说明"
