@@ -112,25 +112,24 @@ def teardown(kernel: KernelApi) -> None:
     pass
 
 
+_THEME = Theme(
+    name="jarvis-dark",
+    primary="#7c5cff",
+    secondary="#58a6ff",
+    accent="#ff9e64",
+    foreground="#e6edf3",
+    background="#0d1117",
+    success="#3fb950",
+    warning="#d29922",
+    error="#f85149",
+    surface="#161b22",
+    panel="#0d1117",
+    dark=True,
+)
+
+
 class _JarvisApp(App):
     """Textual app: output panel + input box + header/footer."""
-
-    THEMES = {
-        "jarvis-dark": Theme(
-            name="jarvis-dark",
-            primary="#7c5cff",
-            secondary="#58a6ff",
-            accent="#ff9e64",
-            foreground="#e6edf3",
-            background="#0d1117",
-            success="#3fb950",
-            warning="#d29922",
-            error="#f85149",
-            surface="#161b22",
-            panel="#0d1117",
-            dark=True,
-        ),
-    }
 
     CSS = """
     Screen { background: $background; }
@@ -194,7 +193,11 @@ class _JarvisApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.theme = "jarvis-dark"
+        try:
+            self.register_theme(_THEME)
+            self.theme = "jarvis-dark"
+        except Exception:  # noqa: BLE001 - already registered / older textual
+            pass
         self._kernel.confirm_action = self._confirm_wait
         self._write(f"{_PRIMARY}JARVIS ›[/] ready. Type /help for commands.")
         self._focus_input()
