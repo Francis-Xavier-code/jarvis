@@ -3,7 +3,9 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -33,4 +35,38 @@ jobs:
       - name: CLI smoke — doctor
         run: uv run jarvis doctor
 
-# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 04:45:07 ---
+  package:
+    name: Build & Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install build deps
+        run: uv venv --clear && uv pip install -e ".[dev,ui]"
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30
+
+      - name: Publish GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 04:48:18 ---
