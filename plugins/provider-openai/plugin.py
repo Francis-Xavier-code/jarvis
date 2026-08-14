@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 try:
     import requests  # soft dependency
@@ -44,6 +45,57 @@ from jarvis.types import (
 )
 
 DEFAULT_BASE = "https://opencode.ai/zen/go/v1"
+
+
+# ---- text-DSL tool-call extraction ----
+# Some aggregators pass DeepSeek-style tool calls through as literal text
+# instead of function-call JSON: <tool_calls><invoke name="x"><parameter
+# name="y">v</parameter></invoke></tool_calls> (ASCII) or the fullwidth-pipe
+# variant <｜｜tool_calls｜｜>...<｜｜/tool_calls｜｜>. Without extraction these
+# blocks render as raw text, the tool never executes, and the turn ends.
+_DSML_OPEN = re.compile(r"<[｜|]*tool_calls[｜|]*>", re.S)
+
+
+def _dsml_parse_invokes(block: str) -> "list[tuple[str, dict]]":
+    out: "list[tuple[str, dict]]" = []
+    for im in re.finditer(
+        r"<[｜|]*invoke name=\"([^\"]+)\"[｜|]*>(.*?)<[｜|]*/invoke[｜|]*>", block, re.S
+    ):
+        name = im.group(1)
+        args: dict = {}
+        for pm in re.finditer(
+            r"<[｜|]*parameter name=\"([^\"]+)\"[^>]*>(.*?)<[｜|]*/parameter[｜|]*>",
+            im.group(2),
+            re.S,
+        ):
+            key, raw = pm.group(1), pm.group(2)
+            try:
+                args[key] = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                args[key] = raw
+        out.append((name, args))
+    return out
+
+
+def _dsml_split(buf: str) -> "tuple[str, str, list]":
+    """Split streamed text on complete <tool_calls> blocks.
+
+    Returns (emit_text, held_back_buf, [(tool_name, args_dict)]). While the
+    buffer is inside an unclosed block it is held back so the raw markers
+    never reach the UI; a completed block becomes tool calls instead.
+    """
+    m = _DSML_OPEN.search(buf)
+    if not m:
+        return buf, "", []
+    head = buf[: m.start()]
+    rest = buf[m.end():]
+    close_tag = "</tool_calls>" if "tool_calls>" in m.group(0) else "<｜｜/tool_calls｜｜>"
+    end = rest.find(close_tag)
+    if end < 0:
+        return head, buf[m.start():], []  # inside an open block: hold back
+    block = rest[:end]
+    tail = rest[end + len(close_tag):]
+    return head + tail, "", _dsml_parse_invokes(block)
 
 
 class OpenAIProvider:
@@ -225,6 +277,7 @@ class OpenAIProvider:
         usage = None
         got_data = False
         saw_done = False
+        dsml_pending = ""
         for raw in resp.iter_lines(decode_unicode=True):
             if not raw or not raw.startswith("data:"):
                 continue
@@ -246,7 +299,15 @@ class OpenAIProvider:
             if delta.get("reasoning_content"):
                 yield ChatChunk(reasoning=delta["reasoning_content"])
             if delta.get("content"):
-                yield ChatChunk(text=delta["content"])
+                text, dsml_pending, calls = _dsml_split(dsml_pending + delta["content"])
+                if text:
+                    yield ChatChunk(text=text)
+                for name, args in calls:
+                    yield ChatChunk(
+                        tool_call=ToolCall(
+                            id="", name=self._name_map.get(name, name), arguments=args
+                        )
+                    )
             for tc in delta.get("tool_calls") or []:
                 idx = int(tc.get("index", 0))
                 acc = tool_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})

@@ -5,6 +5,11 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.2.3] - 2026-08-15
+
+### Changed
+- fix(provider-openai): parse DeepSeek-style <tool_calls> text-DSL blocks (ASCII and fullwidth-pipe variants, streamed in fragments) into real tool calls instead of rendering raw markers and silently ending the turn (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.2.2] - 2026-08-15
 
 ### Fixed
