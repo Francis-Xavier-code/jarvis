@@ -13,3 +13,7 @@ sessions/
 
 # OS
 .DS_Store
+
+# Cloned plugins (pulled at runtime via bootstrap / jarvis install) must not be
+# committed. Authoring plugins under plugins/ WITHOUT this marker stay tracked.
+plugins/**/.jarvis-cloned

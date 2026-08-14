@@ -51,4 +51,6 @@ def clone_plugin(git_url: str, plugins_dir: str, name: str | None = None) -> str
         return name
     Path(plugins_dir).mkdir(parents=True, exist_ok=True)
     _git(str(plugins_dir), ["clone", "--depth", "1", git_url, str(target)])
+    # mark as cloned so it is gitignored and never committed as source
+    (target / ".jarvis-cloned").write_text(git_url)
     return name
