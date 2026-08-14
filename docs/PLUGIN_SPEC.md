@@ -119,6 +119,7 @@ the manifest `kind` for the plugin to be meaningful:
 | `memory`   | `.load(session) -> list[ChatMessage]`, `.append(session, msg)`, `.save(session, messages)` (optional) |
 | `channel`  | `.run(kernel)` (blocking REPL/loop) |
 | `config`   | `.snapshot() -> dict`, `.get(key, default)` |
+| `self`     | optional: `.system_prompt() -> str` injected at the front of every provider request (see §3.4) |
 | `tool`     | no service required (just registers tools) |
 
 ### 3.3 Reading config
@@ -132,6 +133,17 @@ cfg.watch("ha_token", lambda k, v: ...)   # optional change hook
 Config is owned by the `config` plugin (`config-core`); other plugins read it
 through this API. **v1.0 rule: config is free-form** — `get`/`watch` with no
 enforced schema. Validation, if desired, is the config plugin's own concern.
+
+### 3.4 Self-awareness service (`kind = \"self\"`)
+
+A plugin may register a `self` service exposing `.system_prompt() -> str`. If
+present, the kernel prepends that string as a `system` message to **every**
+provider request (regenerated each round, never persisted), giving the model
+its identity, loaded plugins and callable tools as *a priori* context — it does
+not need to remember to call a tool to know what it can do. `plugin-self` is the
+reference implementation.
+
+---
 
 > **memory `save` (optional):** `.save(session, messages)` overwrites the full
 > session history in one call. The kernel prefers it at the end of every turn so

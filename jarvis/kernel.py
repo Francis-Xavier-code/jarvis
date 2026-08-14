@@ -233,6 +233,11 @@ class Kernel:
         request and tool dispatch use that same snapshot, so a hot-reload
         mid-turn can never desynchronise the two. A failing provider is
         reported as error text instead of crashing the caller.
+
+        If a "self" service is registered (plugin-self), its system_prompt() is
+        injected at the front of every provider request — regenerated each
+        round, never persisted — so the assistant always knows its identity,
+        loaded plugins and callable tools without having to query for them.
         """
         provider = self._provider_svc
         if provider is None:
@@ -242,6 +247,19 @@ class Kernel:
         if memory is not None:
             history = memory.load(session)
         history.append(ChatMessage(role="user", content=user_text))
+        self_svc = self._services.get("self")
+
+        def _context_messages() -> list[ChatMessage]:
+            """History plus a freshly generated self-awareness system prompt."""
+            if self_svc is None:
+                return history
+            try:
+                prompt = self_svc.system_prompt()
+            except Exception:  # noqa: BLE001
+                return history
+            if not prompt:
+                return history
+            return [ChatMessage(role="system", content=prompt)] + history
 
         MAX_ROUNDS = 4
         reply_text = ""
@@ -250,7 +268,7 @@ class Kernel:
             snapshot = self.tools_snapshot()
             tool_table = {s.name: s for s in snapshot}
             req = ChatRequest(
-                messages=history,
+                messages=_context_messages(),
                 tools=snapshot,
                 model=self._config.get("model", ""),
             )

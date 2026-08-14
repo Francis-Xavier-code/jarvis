@@ -113,6 +113,7 @@ kernel.service("provider", _EchoProvider())
 | `memory` | `.load(session) -> list[ChatMessage]`,`.append(session, msg)`,`.save(session, messages)`(可选) |
 | `channel` | `.run(kernel)`(阻塞式 REPL/循环) |
 | `config` | `.snapshot() -> dict`,`.get(key, default)` |
+| `self` | 可选:`.system_prompt() -> str`,注入到每一轮 provider 请求的最前面(见 §3.4) |
 | `tool` | 不需要服务(只注册工具即可) |
 
 ### 3.3 读取配置
@@ -126,6 +127,15 @@ cfg.watch("ha_token", lambda k, v: ...)   # 可选的变化钩子
 配置由 `config` 插件(`config-core`)持有;其他插件通过这个 API 读取。
 **v1.0 规则:配置是自由格式** —— `get`/`watch`,没有强制 schema。如需校验,
 那是 config 插件自己的事。
+
+### 3.4 自我认知服务(`kind = \"self\"`)
+
+插件可以注册一个 `self` 服务,暴露 `.system_prompt() -> str`。若存在,内核会把该字符串
+作为 `system` 消息前置到**每一轮** provider 请求(每轮重新生成、永不持久化),让模型把
+自己的身份、已加载插件和可调用工具作为*先验知识*——不需要"想起来"调用工具才知道自己
+能干什么。`plugin-self` 是参考实现。
+
+---
 
 > **memory `save`(可选):** `.save(session, messages)` 一次性全量覆盖会话历史。
 > 内核在每一轮对话结束时优先调用它,以便工具调用轮与 `reasoning_content` 忠实持久化、

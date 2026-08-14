@@ -201,3 +201,52 @@ def test_memory_roundtrip_preserves_tool_calls(kernel: Kernel, tmp_path: Path, m
     assert loaded[1].reasoning_content == "think"
     assert loaded[2].name == "demo.ping"
 
+def test_self_context_injected_as_system_message(kernel: Kernel) -> None:
+    """A self service's system_prompt is injected at the front of every request."""
+    class _Self:
+        kind = "self"
+
+        def system_prompt(self) -> str:
+            return "I am JARVIS. tools: demo.ping"
+
+    kernel._register_service("self", _Self(), "test")
+
+    seen = {}
+
+    class _Spy:
+        kind = "provider"
+
+        def chat(self, req):
+            seen["first"] = req.messages[0]
+            yield ChatChunk(text="[echo] hi")
+
+    kernel._provider_svc = _Spy()
+    out = kernel.chat("sess-self", "hello")
+    assert out == "[echo] hi"
+    assert seen["first"].role == "system"
+    assert "demo.ping" in seen["first"].content
+
+
+def test_state_snapshot_lists_tool_descriptions(kernel: Kernel) -> None:
+    """Snapshot tools carry descriptions from the live routing table."""
+    s = kernel._state_snapshot()
+    tools = {t["name"]: t for t in s["tools"]}
+    assert "demo.ping" in tools
+    assert tools["demo.ping"]["description"]
+
+
+def test_state_snapshot_redacts_secret_config_keys(kernel: Kernel) -> None:
+    """Config view lists keys but never secret-bearing keys."""
+    kernel.set_config({
+        "model": "m",
+        "openai_api_key": "sk-abc",
+        "ha_token": "tok",
+        "ha_base_url": "http://x",
+    })
+    s = kernel._state_snapshot()
+    assert "model" in s["config_keys"]
+    assert "ha_base_url" in s["config_keys"]
+    assert "openai_api_key" not in s["config_keys"]
+    assert "ha_token" not in s["config_keys"]
+
+
