@@ -105,7 +105,7 @@ def _md_block(line: str, in_code: bool) -> str:
     return _md_inline(line)
 
 # tool-call spinner frames (ASCII-safe)
-_SPINNER = "|/-\\"
+_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 # display names for common tools (Claude Code style)
 _KNOWN_TOOLS = {
@@ -248,16 +248,17 @@ class _JarvisApp(App):
         dock: bottom;
         height: 3;
         margin: 0 1 1 1;
-        padding: 0 1;
+        padding: 0 2;
         background: $surface;
-        border: hkey $primary;
+        border: round $primary;
     }
     #in:focus {
-        border: hkey $accent;
+        border: round $accent;
+        background: $panel;
     }
     #brand {
-        height: 13;
-        margin: 0 1;
+        height: auto;
+        margin: 0 1 1 1;
         content-align: center top;
     }
     #brand.hidden {
@@ -318,7 +319,7 @@ class _JarvisApp(App):
         yield Header(show_clock=True)
         yield VerticalScroll(id="chat")
         yield Static("", id="status")
-        yield Input(id="in", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
+        yield Input(id="in", prefix="❯ ", placeholder="message JARVIS... (\\ continues a line, /help for commands)")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -337,8 +338,24 @@ class _JarvisApp(App):
             f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands. "
             f"auto-approve: {_GREEN if state == 'ON' else _DIM}{state}[/]"
         )
+        # replay the persisted conversation so a restart doesn't lose context
+        try:
+            for m in self._kernel.history("terminal"):
+                self._render_history(m)
+        except Exception:  # noqa: BLE001
+            pass
         self._focus_input()
         self.push_screen(_SplashScreen())
+
+    def _render_history(self, m) -> None:
+        """Render one persisted history message at startup (no re-animation)."""
+        if m.role == "user":
+            self._new_message(f"{_SECONDARY}you >[/] {_esc(m.content)}", "user-msg")
+        elif m.role == "assistant" and m.content:
+            self._new_message(f"{_PRIMARY}jarvis >[/] {_esc(m.content)}", "assistant-msg")
+        elif m.role == "tool":
+            first = (m.content or "").strip().split("\n", 1)[0]
+            self._new_message(f"{_DIM}  ⚙ {m.name or 'tool'}: {_short(first, 60)}[/]", "tool-msg")
 
     def _brand_shimmer(self) -> None:
         """Perpetual shimmer sweep on the main-view JARVIS logo (like the splash)."""
@@ -640,7 +657,10 @@ class _JarvisApp(App):
     def _handle_tool_call(self, call) -> None:
         label = _tool_label(call.name, call.arguments or {})
         self._current_tool_label = label
-        self._current_tool = self._new_message(f"  {_SPINNER[0]} {label}", "tool-msg")
+        self._tool_started = time.time()
+        self._current_tool = self._new_message(
+            f"{_SECONDARY}  {_SPINNER[0]} {label} (0.0s)[/]", "tool-msg"
+        )
         self._tool_spinner_idx = 1
         if self._tool_spinner_timer is None:
             self._tool_spinner_timer = self.set_interval(0.1, self._tick_tool_spinner)
@@ -649,7 +669,12 @@ class _JarvisApp(App):
     def _tick_tool_spinner(self) -> None:
         if self._current_tool is not None:
             frame = _SPINNER[self._tool_spinner_idx % len(_SPINNER)]
-            self._update_message(self._current_tool, f"  {frame} {self._current_tool_label}")
+            self._tool_spinner_idx += 1
+            elapsed = time.time() - self._tool_started if self._tool_started else 0.0
+            self._update_message(
+                self._current_tool,
+                f"{_SECONDARY}  {frame} {self._current_tool_label} ({elapsed:.1f}s)[/]",
+            )
 
     def _on_tool_done(self, call, result: str, duration: float) -> None:
         self._ui_call(self._handle_tool_done, call, result, duration)
@@ -660,7 +685,7 @@ class _JarvisApp(App):
             self._tool_spinner_timer = None
         summary = _short(_esc((result or "").strip().split("\n", 1)[0]), 60)
         denied = "not confirmed" in result or result.startswith("[error]") or "refused" in result
-        mark = "x" if denied else "+"
+        mark = "✗" if denied else "✓"
         color = _DIM if denied else _GREEN
         if self._current_tool is not None:
             self._update_message(

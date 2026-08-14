@@ -5,6 +5,16 @@ from plugin.toml. **Every change MUST add an entry here AND bump the version
 in plugin.toml** (patch for fixes, minor for new features). Use the
 plugin.log_change tool to do this automatically.
 
+## [0.6.10] - 2026-08-15
+
+### Changed
+- feat(tui): braille spinner frames, tool-row spinner now animates (was stuck on frame 1) with live elapsed seconds, ✓/✗ completion marks, rounded input with ❯ prefix and focus highlight (by JARVIS <jarvis@jarvis.local>)
+
+## [0.6.9] - 2026-08-15
+
+### Changed
+- fix(tui): brand logo widget height auto — 5-row JARVIS logo no longer leaves a ~7-row gap before the chat area (was hardcoded height:13) (by JARVIS <jarvis@jarvis.local>)
+
 ## [0.6.8] - 2026-08-15
 
 ### Added

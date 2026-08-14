@@ -124,6 +124,11 @@ class KernelApi:
     def config(self) -> "ConfigApi":
         return self._kernel.config_api
 
+    def history(self, session: str) -> list:
+        """Load a session's persisted conversation history (empty if none)."""
+        svc = self._kernel._memory_svc
+        return list(svc.load(session)) if svc is not None else []
+
 
 class PluginApi:
     """Runtime plugin control exposed to tools (e.g. jarvis.install_plugin).
@@ -181,3 +186,5 @@ class ConfigApi:
 
     def watch(self, key: str, cb: Callable[[str, Any], None]) -> None:
         self._kernel._config_watch(key, cb)
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 03:51:17 ---
