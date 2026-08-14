@@ -1,0 +1,137 @@
+"""PluginManager: discover, load, and hot-reload JARVIS plugins.
+
+v1 plugins are plain subdirectories of ``plugins/`` (NOT separate git repos).
+A plugin is any folder containing ``plugin.toml``. The manager:
+
+  * scans ``plugins/<name>/`` for ``plugin.toml``
+  * validates the manifest with pydantic
+  * imports ``<entry>`` as a module and calls ``setup(api)``
+  * watches each plugin dir for mtime/content changes -> teardown + reload
+    WITHOUT restarting the whole process.
+
+Hot-reload is safe for in-flight conversations because the kernel hands the
+agent loop a *snapshot* of the tool table per turn; changes only affect the
+next turn.
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+from .types import KernelApi
+
+
+class PluginManifest(BaseModel):
+    name: str
+    kind: str  # provider | memory | channel | config | tool
+    version: str = "0.0.0"
+    entry: str = "plugin.py"
+    hot_reload: bool = True
+    dependencies: list[str] = Field(default_factory=list)
+    provides: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class Plugin:
+    def __init__(self, path: Path, manifest: PluginManifest) -> None:
+        self.path = path
+        self.manifest = manifest
+        self.name = manifest.name
+        self.module: Any = None
+        self._last_signature: str = ""
+
+    def signature(self) -> str:
+        """Cheap content fingerprint for change detection."""
+        parts: list[str] = []
+        for root, _dirs, files in os.walk(self.path):
+            for f in sorted(files):
+                if f.endswith((".py", ".toml")):
+                    fp = Path(root) / f
+                    try:
+                        parts.append(f"{fp.stat().st_mtime:.0f}:{fp.stat().st_size}")
+                    except OSError:
+                        pass
+        return "|".join(parts)
+
+
+class PluginManager:
+    def __init__(self, plugins_dir: Path, kernel: Any) -> None:
+        self.plugins_dir = Path(plugins_dir)
+        self.kernel = kernel
+        self.plugins: dict[str, Plugin] = {}
+        self._load_errors: dict[str, str] = {}
+
+    def discover(self) -> list[Plugin]:
+        found: list[Plugin] = []
+        if not self.plugins_dir.exists():
+            return found
+        for child in sorted(self.plugins_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            toml_path = child / "plugin.toml"
+            if not toml_path.exists():
+                continue
+            try:
+                manifest = PluginManifest.model_validate_toml(toml_path.read_text())
+            except Exception as exc:  # noqa: BLE001
+                self._load_errors[child.name] = f"manifest invalid: {exc}"
+                continue
+            found.append(Plugin(child, manifest))
+        return found
+
+    def load_all(self) -> None:
+        for plugin in self.discover():
+            self.plugins[plugin.name] = plugin
+            self._load_plugin(plugin)
+
+    def _load_plugin(self, plugin: Plugin) -> bool:
+        try:
+            self.kernel._set_active(plugin.name)
+            spec = importlib.util.spec_from_file_location(
+                f"jarvis_plugin_{plugin.name}",
+                plugin.path / plugin.manifest.entry,
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError("cannot build import spec")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, "setup"):
+                raise ImportError("plugin has no setup()")
+            module.setup(KernelApi(self.kernel))
+            plugin.module = module
+            plugin._last_signature = plugin.signature()
+            self._load_errors.pop(plugin.name, None)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self._load_errors[plugin.name] = str(exc)
+            return False
+
+    def reload(self, name: str) -> bool:
+        """teardown + reload a single plugin. Safe (no full restart)."""
+        plugin = self.plugins.get(name)
+        if plugin is None or not plugin.manifest.hot_reload:
+            return False
+        module = plugin.module
+        if module is not None and hasattr(module, "teardown"):
+            try:
+                module.teardown(KernelApi(self.kernel))
+            except Exception:  # noqa: BLE001
+                pass
+        self.kernel._unregister_plugin(name)
+        ok = self._load_plugin(plugin)
+        return ok
+
+    def check_hot_reload(self) -> list[str]:
+        """Find plugins whose content changed; reload them. Returns reloaded names."""
+        reloaded: list[str] = []
+        for name, plugin in list(self.plugins.items()):
+            if not plugin.manifest.hot_reload:
+                continue
+            sig = plugin.signature()
+            if sig != plugin._last_signature:
+                if self.reload(name):
+                    reloaded.append(name)
+        return reloaded

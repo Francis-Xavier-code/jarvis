@@ -1,0 +1,10 @@
+[plugin]
+name = "config-core"
+kind = "config"
+version = "0.1.0"
+entry = "plugin.py"
+hot_reload = true
+dependencies = []
+
+[provides]
+tools = []

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+uv.lock
+
+# JARVIS data
+data/
+sessions/
+
+# OS
+.DS_Store
