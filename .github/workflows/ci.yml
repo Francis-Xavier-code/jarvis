@@ -7,14 +7,30 @@ on:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
+
+      - name: Install uv + Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-      - name: Create venv and install
-        run: uv venv --clear && uv pip install -e ".[dev]"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Create venv and install (dev + ui extras)
+        run: uv venv --clear && uv pip install -e ".[dev,ui]"
+
       - name: Run tests
         run: uv run pytest -q
+
+      - name: CLI smoke — plugin bootstrap
+        run: uv run jarvis bootstrap
+
+      - name: CLI smoke — doctor
+        run: uv run jarvis doctor
+
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 04:45:07 ---
