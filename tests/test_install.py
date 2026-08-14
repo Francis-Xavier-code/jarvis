@@ -125,3 +125,18 @@ def test_install_requires_user_confirmation(kernel: Kernel, tmp_path: Path) -> N
     assert "refused" in out and "not confirmed" in out
     assert not list((tmp_path / "plugins").iterdir())
 
+
+def test_install_auto_approve_skips_confirmation_gate(kernel: Kernel, monkeypatch) -> None:
+    """auto_approve=true lets assistant installs through without prompting."""
+    from jarvis.types import PluginApi
+
+    kernel.set_config({"auto_approve": True})
+    kernel.confirm_install = lambda url: False  # would refuse if consulted
+    calls: list[str] = []
+    monkeypatch.setattr(
+        kernel, "install_plugin", lambda url, name=None: (calls.append(url) or "ok")
+    )
+    api = PluginApi(kernel)
+    assert api.install_from_url("https://example.com/repo.git") == "ok"
+    assert calls == ["https://example.com/repo.git"]
+

@@ -4,6 +4,18 @@ All notable changes to the JARVIS project are recorded here. The project
 version lives in pyproject.toml; plugin-level changes live in each
 plugins/<name>/CHANGELOG.md (see PLUGIN_SPEC §7.2).
 
+## [Unreleased]
+
+### Added
+- **auto-approve**: `auto_approve = true` in config.toml approves
+  assistant-initiated actions (bash commands, out-of-root file writes, plugin
+  installs) without interactive y/N prompts — for trusted/headless setups;
+  read live from the config, so toggling config.toml hot-reloads into effect
+- **TUI auto-approve switch**: `/autoapprove [on|off|toggle]` command flips
+  the gate live from the TUI and persists it to config.toml (config-core now
+  supports writing keys back to the file, comments preserved); startup banner
+  shows the current auto-approve state
+
 ## [0.2.0] - 2026-08-15 — agent-ready
 
 ### Added

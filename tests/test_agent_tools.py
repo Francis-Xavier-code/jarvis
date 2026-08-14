@@ -43,6 +43,14 @@ def test_bash_requires_confirmation(tools: Kernel) -> None:
     assert "not confirmed" in out
 
 
+def test_bash_auto_approved_via_config(tools: Kernel) -> None:
+    """auto_approve=true runs bash even when the confirm handler would refuse."""
+    tools.confirm_action = lambda prompt: False
+    tools.set_config({"auto_approve": True, "agent-identity": {"sign_edits": False}})
+    out = _h(tools, "bash.execute")("echo auto")
+    assert "auto" in out and "not confirmed" not in out
+
+
 def test_fs_write_read_edit_append(tools: Kernel) -> None:
     w, rd = _h(tools, "fs.write"), _h(tools, "fs.read")
     ed, ap = _h(tools, "fs.edit"), _h(tools, "fs.append")

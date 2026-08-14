@@ -62,13 +62,44 @@ class Kernel:
         self.confirm_install: Callable[[str], bool] | None = self._default_confirm_install
         # Generic gate for assistant-initiated actions (bash commands, out-of-
         # project file writes ...). Same interactive default as confirm_install.
+        # Both gates are bypassed when config `auto_approve = true` (headless /
+        # trusted setups): see auto_approve().
         self.confirm_action: Callable[[str], bool] | None = self._default_confirm_install
+
+    def auto_approve(self) -> bool:
+        """True when config ``auto_approve`` is set.
+
+        With auto-approve on, assistant-initiated actions (bash commands,
+        file writes, plugin installs) are approved automatically instead of
+        prompting the user. Read live from the config, so toggling
+        config.toml hot-reloads into effect without a restart.
+        """
+        return bool(self._config.get("auto_approve"))
+
+    def set_auto_approve(self, on: bool) -> None:
+        """Turn auto-approve on/off live, persisting it to config.toml.
+
+        Updates the in-memory config immediately (channels can toggle it at
+        runtime, e.g. the TUI's /autoapprove command) and, when the config
+        plugin is loaded, writes the key through its ``set`` hook so the
+        choice survives a restart.
+        """
+        self._config["auto_approve"] = bool(on)
+        cfg = self._services.get("config")
+        if cfg is not None and hasattr(cfg, "set"):
+            try:
+                cfg.set("auto_approve", bool(on))
+            except Exception:  # noqa: BLE001 - persistence is best-effort
+                pass
 
     def confirm(self, prompt: str) -> bool:
         """Ask the user to approve an assistant-initiated action.
 
-        Refuses by default when no handler is configured or it errors.
+        Refuses by default when no handler is configured or it errors;
+        approves without prompting when config ``auto_approve`` is set.
         """
+        if self.auto_approve():
+            return True
         if self.confirm_action is None:
             return False
         try:
@@ -596,4 +627,4 @@ class Kernel:
         except Exception as exc:  # noqa: BLE001
             return f"[error] {call.name} failed: {exc}"
 
-# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 01:59:00 ---
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 02:47:51 ---

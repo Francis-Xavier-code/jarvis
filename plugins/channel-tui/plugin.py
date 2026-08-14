@@ -22,7 +22,7 @@ import time
 from jarvis.types import KernelApi
 
 from . import ui
-from .ui import GLYPHS, FRAMES, render_big, render_whale, shimmer_line
+from .ui import render_big, shimmer_line
 
 # ---- soft dependency ----
 try:
@@ -151,23 +151,20 @@ _THEME = Theme(
 
 
 class _SplashScreen(Screen):
-    """Startup splash: big-font title with blue-white shimmer + pixel whale animation."""
+    """Startup splash: big-font JARVIS title with blue-white shimmer + tagline."""
 
     CSS = """
     #splash-root { align: center middle; }
     #splash-big { width: auto; }
-    #splash-whale { width: auto; }
+    #splash-tag { width: auto; }
     """
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="splash-root"):
             yield Static("", id="splash-big")
-            yield Static("", id="splash-whale")
+            yield Static(f"[{_DIM}]microkernel · everything is a plugin[/]", id="splash-tag")
 
     def on_mount(self) -> None:
-        self._frames = ui.whale_frames_sequence()
-        self._fi = 0
-        self._timer = self.set_interval(0.1, self._next_frame)
         self._big_rows = render_big("JARVIS")
         self._step = 0
         self._stimer = self.set_interval(0.05, self._shimmer)
@@ -176,10 +173,6 @@ class _SplashScreen(Screen):
 
     def _dismiss_now(self) -> None:
         self.dismiss()
-
-    def _next_frame(self) -> None:
-        self.query_one("#splash-whale", Static).update(self._frames[self._fi % len(self._frames)])
-        self._fi += 1
 
     def _shimmer(self) -> None:
         rows = "\n".join(shimmer_line(row, self._step) for row in self._big_rows)
@@ -296,7 +289,11 @@ class _JarvisApp(App):
             pass
         self._kernel.confirm_action = self._confirm_wait
         self.query_one("#whale", Static).update("\n".join(render_whale("standard")))
-        self._log(f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands.")
+        state = "ON" if self._kernel.auto_approve() else "OFF"
+        self._log(
+            f"{_PRIMARY}JARVIS >[/] ready. Type /help for commands. "
+            f"auto-approve: {_GREEN if state == 'ON' else _DIM}{state}[/]"
+        )
         self._focus_input()
         self.push_screen(_SplashScreen())
 
@@ -423,8 +420,36 @@ class _JarvisApp(App):
             self.exit()
         elif c == "/clear":
             self.query_one("#chat", VerticalScroll).remove_children()
+        elif c == "/autoapprove" or c.startswith("/autoapprove "):
+            self._log(self._autoapprove_cmd(c))
         else:
             self._log(f"{_DIM}unknown command: {c} (try /help)[/]")
+
+    def _autoapprove_cmd(self, cmd: str) -> str:
+        """Handle /autoapprove [on|off|toggle]: live auto-approve switch.
+
+        Toggles the kernel's auto-approve mode (bash/file/install actions no
+        longer prompt y/N) and persists it to config.toml via the kernel.
+        """
+        parts = cmd.split()
+        current = self._kernel.auto_approve()
+        if len(parts) == 1:
+            state = "ON" if current else "OFF"
+            return (
+                f"auto-approve is [bold]{state}[/] — "
+                "/autoapprove on|off|toggle to change"
+            )
+        arg = parts[1].lower()
+        if arg in ("on", "true", "yes", "1"):
+            self._kernel.set_auto_approve(True)
+            return "auto-approve [bold]ON[/] — assistant actions run without y/N prompts"
+        if arg in ("off", "false", "no", "0"):
+            self._kernel.set_auto_approve(False)
+            return "auto-approve [bold]OFF[/] — confirmations restored"
+        if arg == "toggle":
+            self._kernel.set_auto_approve(not current)
+            return f"auto-approve [bold]{'ON' if not current else 'OFF'}[/]"
+        return "usage: /autoapprove [on|off|toggle]"
 
     # ---- chat worker ----
     def _start_chat(self, text: str) -> None:
@@ -616,6 +641,7 @@ class _JarvisApp(App):
 _HELP = """
 [bold cyan]Commands[/]
   /help /clear /exit
+  /autoapprove [on|off|toggle]   control the auto-approve switch
 
 [bold cyan]Input[/]
   - end a line with backslash to continue on the next line
@@ -636,4 +662,4 @@ class _TuiChannel:
             return
         _JarvisApp(kernel).run()
 
-# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 02:11:23 ---
+# --- last modified by JARVIS <jarvis@jarvis.local> on 2026-08-15 02:52:00 ---

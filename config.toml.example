@@ -7,6 +7,15 @@
 # Anything under [section] is a nested dict: e.g. [provider-openai] below is
 # read by provider-openai as config.get("provider-openai", {}).
 
+# ---- assistant safety gate ----
+# Every assistant-initiated action (bash commands, file writes outside the
+# project root, plugin installs) asks for y/N confirmation by default.
+# Set auto_approve = true to approve them automatically — for trusted,
+# headless setups where nobody is at the keyboard to answer prompts.
+# Toggling this hot-reloads into effect without a restart; in the TUI you can
+# also flip it live with: /autoapprove [on|off|toggle]
+auto_approve = false
+
 # ---- model provider (OpenAI-compatible) ----
 [provider-openai]
 openai_base_url = "https://opencode.ai/zen/go/v1"

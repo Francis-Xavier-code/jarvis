@@ -132,7 +132,8 @@ class PluginApi:
     the CLI: only http(s) URLs may be installed (no file:// / ssh:// surprises),
     and every install must pass the kernel's confirmation gate (an interactive
     y/N prompt by default) — cloning a repo executes its plugin.py in-process,
-    so assistant-initiated installs must never happen silently.
+    so assistant-initiated installs must never happen silently. The gate is
+    skipped when config ``auto_approve = true`` (trusted/headless setups).
     """
 
     def __init__(self, kernel: "Any") -> None:
@@ -144,13 +145,14 @@ class PluginApi:
                 "[refused] only http(s) git URLs may be installed by the assistant; "
                 "use `jarvis install` for local paths"
             )
-        confirm = getattr(self._kernel, "confirm_install", None)
-        if confirm is not None:
-            try:
-                if not confirm(git_url):
-                    return "[refused] installation not confirmed by the user"
-            except Exception:  # noqa: BLE001
-                return "[refused] installation confirmation failed"
+        if not self._kernel.auto_approve():
+            confirm = getattr(self._kernel, "confirm_install", None)
+            if confirm is not None:
+                try:
+                    if not confirm(git_url):
+                        return "[refused] installation not confirmed by the user"
+                except Exception:  # noqa: BLE001
+                    return "[refused] installation confirmation failed"
         try:
             return self._kernel.install_plugin(git_url, name)
         except Exception as exc:  # noqa: BLE001

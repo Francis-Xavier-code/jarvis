@@ -74,3 +74,26 @@ def test_md_inline_renders_and_escapes_brackets(kernel: Kernel) -> None:
     assert "https://" not in out3
 
 
+def test_autoapprove_command_toggles_kernel(kernel: Kernel) -> None:
+    """/autoapprove flips the live kernel gate (no config svc in this fixture)."""
+    import sys
+
+    mod = sys.modules["jarvis_plugin_channel_tui"]
+    app = mod._JarvisApp(kernel)
+    # query shows the current state without changing it
+    assert "OFF" in app._autoapprove_cmd("/autoapprove")
+    assert kernel.auto_approve() is False
+    # on / off / toggle
+    assert "ON" in app._autoapprove_cmd("/autoapprove on")
+    assert kernel.auto_approve() is True
+    assert "OFF" in app._autoapprove_cmd("/autoapprove toggle")
+    assert kernel.auto_approve() is False
+    assert "OFF" in app._autoapprove_cmd("/autoapprove off")
+    assert kernel.auto_approve() is False
+    assert "ON" in app._autoapprove_cmd("/autoapprove yes")
+    assert kernel.auto_approve() is True
+    # unknown argument -> usage hint, state untouched
+    assert "usage" in app._autoapprove_cmd("/autoapprove maybe")
+    assert kernel.auto_approve() is True
+
+

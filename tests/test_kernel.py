@@ -374,6 +374,48 @@ def test_tool_done_callback_fires(kernel: Kernel) -> None:
     assert all(d >= 0 for _, _, d in done)
 
 
+def test_confirm_auto_approve_skips_handler(kernel: Kernel) -> None:
+    """auto_approve=true approves without consulting the confirm handler."""
+    kernel.set_config({"auto_approve": True})
+    kernel.confirm_action = lambda prompt: False  # would refuse if consulted
+    assert kernel.confirm("run dangerous command?") is True
+
+
+def test_confirm_auto_approve_toggles_with_config(kernel: Kernel) -> None:
+    """auto_approve reads the live config, so hot-reload toggling works."""
+    kernel.confirm_action = lambda prompt: False
+    assert kernel.confirm("run this?") is False
+    kernel.set_config({"auto_approve": True})
+    assert kernel.confirm("run this?") is True
+    kernel.set_config({})
+    assert kernel.confirm("run this?") is False
+
+
+def test_set_auto_approve_updates_live_and_persists(kernel: Kernel) -> None:
+    """set_auto_approve flips the gate now and writes through the config svc."""
+    seen: list[tuple] = []
+
+    class _Cfg:
+        kind = "config"
+
+        def set(self, key, value):
+            seen.append((key, value))
+
+    kernel._register_service("config", _Cfg(), "test")
+    kernel.set_auto_approve(True)
+    assert kernel.auto_approve() is True
+    assert kernel.confirm("run this?") is True
+    kernel.set_auto_approve(False)
+    assert kernel.auto_approve() is False
+    assert seen == [("auto_approve", True), ("auto_approve", False)]
+
+
+def test_set_auto_approve_works_without_config_service(kernel: Kernel) -> None:
+    """No config plugin loaded: still flips live, persistence is skipped."""
+    kernel.set_auto_approve(True)
+    assert kernel.auto_approve() is True
+
+
 
 
 
