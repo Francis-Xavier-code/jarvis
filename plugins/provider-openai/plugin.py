@@ -14,8 +14,10 @@ Reads from config (via the config-core plugin) or env vars:
 
 Tool calling is supported: the kernel passes ToolSpecs; this provider forwards
 them as OpenAI `tools` and yields a ChatChunk(tool_call=...) for each function
-call the model emits. Tool results are fed back as `role: "tool"` messages
-(carrying the matching tool_call_id, which the kernel does not track for us).
+call the model emits. Tool results are fed back as `role: "tool"` messages with
+the exact tool_call_id of the assistant turn that produced them (paired in
+history order), and tool names are mapped to dot-free wire names on every
+outbound message so multi-round replay is consistent.
 
 Depends on `requests` — soft-imported so the plugin loads even before the user
 installs it; a clear error is returned if a chat is attempted without it.
@@ -24,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 
 try:
     import requests  # soft dependency
@@ -47,6 +48,7 @@ class OpenAIProvider:
 
     def __init__(self, kernel: KernelApi) -> None:
         self._kernel = kernel
+        self._name_map: dict[str, str] = {}
 
     # ---- config helpers ----
     def _cfg(self, key: str, env: str, default: str = "") -> str:
@@ -65,58 +67,70 @@ class OpenAIProvider:
         # aggregator does not have gpt-4o-mini; fall back to a cheap, fast model.
         return self._cfg("model", "MODEL", "deepseek-v4-flash")
 
+    # ---- tool-name mapping (dots are not allowed upstream) ----
+    def _ensure_name_map(self, tools) -> None:
+        """Build real_name <-> wire_name for every tool in the snapshot."""
+        self._name_map = {}
+        for t in tools:
+            wire = t.name.replace(".", "_")
+            self._name_map[t.name] = wire
+            self._name_map[wire] = t.name
+
+    def _wire_name(self, name: str) -> str:
+        return self._name_map.get(name, name)
+
     # ---- conversion: kernel ChatMessage -> openai message ----
     def _to_openai_messages(self, messages: list[ChatMessage]) -> list[dict]:
         """Convert kernel history to OpenAI messages.
 
-        The kernel now stores an assistant turn's tool_calls on the
-        ChatMessage (role="assistant", tool_calls=[...]), so we replay them
-        verbatim. Tool results arrive as ChatMessage(role="tool", name=...) and
-        are forwarded with the matching tool_call_id taken from the preceding
-        assistant message's tool_calls.
+        Assistant tool_calls are replayed with dot-free wire names (matching the
+        tools advertised in this request), and each role="tool" result is bound
+        to the tool_call_id of the assistant call that produced it — paired in
+        history order rather than by name, so repeated calls to the same tool
+        never get cross-wired. reasoning_content is only echoed when non-empty,
+        so endpoints without deepseek-style thinking accept the payload.
         """
         out: list[dict] = []
+        pending_ids: list[str] = []
         for m in messages:
             if m.role == "tool":
-                # find the tool_call_id from the assistant turn that produced it
-                tcid = ""
-                for prev in out:
-                    if prev.get("role") == "assistant" and prev.get("tool_calls"):
-                        for tc in prev["tool_calls"]:
-                            if tc.get("function", {}).get("name") == m.name:
-                                tcid = tc.get("id", "")
+                tcid = pending_ids.pop(0) if pending_ids else ""
                 out.append(
-                    {"role": "tool", "name": m.name, "content": m.content, "tool_call_id": tcid}
+                    {
+                        "role": "tool",
+                        "name": self._wire_name(m.name or ""),
+                        "content": m.content,
+                        "tool_call_id": tcid,
+                    }
                 )
             elif m.role == "assistant" and m.tool_calls:
-                out.append(
-                    {
-                        "role": "assistant",
-                        "content": m.content or None,
-                        "tool_calls": m.tool_calls,
-                        "reasoning_content": m.reasoning_content or "",
-                    }
-                )
+                calls = []
+                for tc in m.tool_calls:
+                    fn = dict(tc.get("function", {}))
+                    fn["name"] = self._wire_name(fn.get("name", ""))
+                    calls.append({**tc, "function": fn})
+                    tcid = tc.get("id")
+                    if tcid:
+                        pending_ids.append(tcid)
+                msg: dict = {"role": "assistant", "content": m.content or None, "tool_calls": calls}
+                if m.reasoning_content:
+                    msg["reasoning_content"] = m.reasoning_content
+                out.append(msg)
             elif m.role == "assistant":
-                # plain assistant turn (no tool calls) — still echo reasoning
-                out.append(
-                    {
-                        "role": "assistant",
-                        "content": m.content,
-                        "reasoning_content": m.reasoning_content or "",
-                    }
-                )
+                # plain assistant turn (no tool calls) — echo reasoning if any
+                msg = {"role": "assistant", "content": m.content}
+                if m.reasoning_content:
+                    msg["reasoning_content"] = m.reasoning_content
+                out.append(msg)
             else:
                 out.append({"role": m.role, "content": m.content})
         return out
 
     def _to_openai_tools(self, tools) -> list[dict]:
-        self._name_map = {}  # real_name <-> wire_name (dots not allowed upstream)
+        # name map was already built by _ensure_name_map(req.tools) in chat()
         out = []
         for t in tools:
-            wire = t.name.replace(".", "_")
-            self._name_map[t.name] = wire
-            self._name_map[wire] = t.name
+            wire = self._name_map.get(t.name, t.name.replace(".", "_"))
             params = t.parameters or {}
             # Some plugins register only the `properties` map; OpenAI requires a
             # full schema with type:"object". Normalise defensively.
@@ -149,17 +163,19 @@ class OpenAIProvider:
         model = req.model or self._model()
         url = f"{base}/chat/completions"
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-        payload: dict = {
-            "model": model,
-            "messages": self._to_openai_messages(req.messages),
-            "stream": False,
-        }
-        tools = self._to_openai_tools(req.tools)
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
+        self._ensure_name_map(req.tools)
 
         try:
+            payload: dict = {
+                "model": model,
+                "messages": self._to_openai_messages(req.messages),
+                "stream": False,
+            }
+            tools = self._to_openai_tools(req.tools)
+            if tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
             resp = None
             last_exc: Exception | None = None
             for attempt in range(3):
@@ -172,16 +188,16 @@ class OpenAIProvider:
             if resp is None:
                 yield ChatChunk(text=f"[provider-openai] request failed: {last_exc}")
                 return
+            if resp.status_code != 200:
+                yield ChatChunk(text=f"[provider-openai] HTTP {resp.status_code}: {resp.text[:400]}")
+                return
+            data = resp.json()
+            choice = data["choices"][0]
         except Exception as exc:  # noqa: BLE001
-            yield ChatChunk(text=f"[provider-openai] request failed: {exc}")
+            # non-JSON body, empty choices, missing keys ... report instead of crash
+            yield ChatChunk(text=f"[provider-openai] invalid upstream response: {exc}")
             return
 
-        if resp.status_code != 200:
-            yield ChatChunk(text=f"[provider-openai] HTTP {resp.status_code}: {resp.text[:400]}")
-            return
-
-        data = resp.json()
-        choice = data["choices"][0]
         msg = choice["message"]
         content = msg.get("content") or ""
         reasoning = msg.get("reasoning_content") or ""
@@ -200,7 +216,9 @@ class OpenAIProvider:
                 args = json.loads(fn.get("arguments", "{}") or "{}")
             except Exception:  # noqa: BLE001
                 args = {}
-            yield ChatChunk(tool_call=ToolCall(name=name, arguments=args))
+            yield ChatChunk(
+                tool_call=ToolCall(id=tc.get("id") or "", name=name, arguments=args)
+            )
 
         yield ChatChunk(done=True)
 

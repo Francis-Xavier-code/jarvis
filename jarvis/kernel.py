@@ -3,8 +3,10 @@
 Responsibilities (and NOTHING else):
   * hold the global tool table + service registry (rebuilt on plugin reload)
   * run the agent loop: memory.load -> provider.chat(stream) -> on tool_call
-    route to the plugin handler -> feed result back -> memory.append
-  * expose a per-turn *snapshot* of tools so hot-reload never breaks a running turn
+    route to the plugin handler -> feed result back -> memory.save/append
+  * expose a per-round *snapshot* of tools so hot-reload never breaks a
+    running turn (both the provider request and tool dispatch use the same
+    snapshot taken at the start of the round)
 """
 from __future__ import annotations
 
@@ -207,7 +209,13 @@ class Kernel:
 
     # ---- agent loop ----
     def chat(self, session: str, user_text: str) -> str:
-        """One conversation turn. Returns assistant text."""
+        """One conversation turn. Returns assistant text.
+
+        Each round takes a fresh snapshot of the tool table; both the provider
+        request and tool dispatch use that same snapshot, so a hot-reload
+        mid-turn can never desynchronise the two. A failing provider is
+        reported as error text instead of crashing the caller.
+        """
         provider = self._provider_svc
         if provider is None:
             return "[jarvis] no provider plugin loaded"
@@ -217,33 +225,40 @@ class Kernel:
             history = memory.load(session)
         history.append(ChatMessage(role="user", content=user_text))
 
-        req = ChatRequest(
-            messages=history,
-            tools=self.tools_snapshot(),
-            model=self._config.get("model", ""),
-        )
-
-        # Agent loop: run provider, resolve any tool calls by feeding results
-        # back, repeat until a turn yields no tool calls (or hits max rounds).
         MAX_ROUNDS = 4
+        reply_text = ""
+        reasoning_text = ""
         for _ in range(MAX_ROUNDS):
+            snapshot = self.tools_snapshot()
+            tool_table = {s.name: s for s in snapshot}
+            req = ChatRequest(
+                messages=history,
+                tools=snapshot,
+                model=self._config.get("model", ""),
+            )
             reply_text = ""
             reasoning_text = ""
             pending_calls: list[ToolCall] = []
-            for chunk in provider.chat(req):
-                if chunk.text:
-                    reply_text += chunk.text
-                if chunk.reasoning:
-                    reasoning_text += chunk.reasoning
-                if chunk.tool_call:
-                    pending_calls.append(chunk.tool_call)
+            try:
+                for chunk in provider.chat(req):
+                    if chunk.text:
+                        reply_text += chunk.text
+                    if chunk.reasoning:
+                        reasoning_text += chunk.reasoning
+                    if chunk.tool_call:
+                        pending_calls.append(chunk.tool_call)
+            except Exception as exc:  # noqa: BLE001
+                reply_text = f"[error] provider failed: {exc}"
+                pending_calls = []
+                break
             if not pending_calls:
                 break
             # Store the assistant turn WITH its tool_calls so the history can be
             # replayed verbatim for providers that require tool_call_id binding.
+            # Prefer the provider-assigned id (threaded through ToolCall.id).
             assistant_tool_calls = [
                 {
-                    "id": f"call_{i}_{abs(hash(c.name)) % 100000}",
+                    "id": c.id or f"call_{i}_{abs(hash(c.name)) % 100000}",
                     "type": "function",
                     "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)},
                 }
@@ -258,29 +273,45 @@ class Kernel:
                 )
             )
             for call in pending_calls:
-                result = self._invoke_tool(call)
-                history.append(
-                    ChatMessage(role="tool", content=result, name=call.name)
-                )
-            req = ChatRequest(
-                messages=history,
-                tools=self.tools_snapshot(),
-                model=self._config.get("model", ""),
-            )
+                result = self._invoke_tool(call, tool_table)
+                history.append(ChatMessage(role="tool", content=result, name=call.name))
 
         if memory is not None:
-            _user_msg = ChatMessage(role="user", content=user_text)
-            _asst_msg = ChatMessage(
-                role="assistant",
-                content=reply_text,
-                reasoning_content=reasoning_text or None,
-            )
-            memory.append(session, _user_msg)
-            memory.append(session, _asst_msg)
+            self._persist_turn(memory, session, history, user_text, reply_text, reasoning_text)
         return reply_text
 
-    def _invoke_tool(self, call: ToolCall) -> str:
-        spec = self._tools.get(call.name)
+    def _persist_turn(
+        self,
+        memory: Any,
+        session: str,
+        history: list[ChatMessage],
+        user_text: str,
+        reply_text: str,
+        reasoning_text: str,
+    ) -> None:
+        """Persist the turn. Prefers full-history ``save`` (keeps tool-call
+        rounds and reasoning for faithful replay); falls back to appending just
+        the user + final assistant message for legacy memory plugins."""
+        save = getattr(memory, "save", None)
+        if callable(save):
+            try:
+                save(session, history)
+                return
+            except Exception:  # noqa: BLE001
+                pass  # fall through to append-based persistence
+        memory.append(session, ChatMessage(role="user", content=user_text))
+        memory.append(
+            session,
+            ChatMessage(role="assistant", content=reply_text, reasoning_content=reasoning_text or None),
+        )
+
+    def _invoke_tool(self, call: ToolCall, tool_table: dict[str, ToolSpec]) -> str:
+        """Dispatch a tool call against the round's snapshot (never live tables).
+
+        Using the snapshot means a mid-turn plugin reload cannot make an
+        already-planned tool call vanish or swap to a half-loaded handler.
+        """
+        spec = tool_table.get(call.name)
         if spec is None or spec.handler is None:
             return f"[error] unknown tool: {call.name}"
         try:

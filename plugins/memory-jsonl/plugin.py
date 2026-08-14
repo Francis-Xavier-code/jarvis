@@ -2,6 +2,10 @@
 
 One file per session under JARVIS_DATA/sessions/<session>.jsonl. Minimal, no
 extra dependencies, hot-reload safe (stateless between calls).
+
+Persistence is full-history: ``save`` writes the complete message list
+(including assistant tool_calls and reasoning_content) so multi-turn tool
+rounds replay faithfully; ``append`` remains for incremental writes.
 """
 from __future__ import annotations
 
@@ -35,6 +39,15 @@ def teardown(kernel: KernelApi) -> None:
 class _JsonlMemory:
     kind = "memory"
 
+    @staticmethod
+    def _dump(msg: ChatMessage) -> dict:
+        d: dict = {"role": msg.role, "content": msg.content, "name": msg.name}
+        if msg.tool_calls:
+            d["tool_calls"] = msg.tool_calls
+        if msg.reasoning_content:
+            d["reasoning_content"] = msg.reasoning_content
+        return d
+
     def load(self, session: str) -> list[ChatMessage]:
         p = _path(session)
         if not p.exists():
@@ -46,7 +59,15 @@ class _JsonlMemory:
                 continue
             try:
                 d = json.loads(line)
-                out.append(ChatMessage(role=d["role"], content=d["content"], name=d.get("name")))
+                out.append(
+                    ChatMessage(
+                        role=d["role"],
+                        content=d.get("content", ""),
+                        name=d.get("name"),
+                        tool_calls=d.get("tool_calls"),
+                        reasoning_content=d.get("reasoning_content"),
+                    )
+                )
             except Exception:  # noqa: BLE001
                 continue
         return out
@@ -54,4 +75,11 @@ class _JsonlMemory:
     def append(self, session: str, msg: ChatMessage) -> None:
         p = _path(session)
         with p.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"role": msg.role, "content": msg.content, "name": msg.name}) + "\n")
+            f.write(json.dumps(self._dump(msg), ensure_ascii=False) + "\n")
+
+    def save(self, session: str, messages: list[ChatMessage]) -> None:
+        """Full-history overwrite (used by the kernel at the end of a turn)."""
+        p = _path(session)
+        with p.open("w", encoding="utf-8") as f:
+            for msg in messages:
+                f.write(json.dumps(self._dump(msg), ensure_ascii=False) + "\n")

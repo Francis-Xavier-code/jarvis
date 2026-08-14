@@ -63,6 +63,9 @@ class ChatChunk:
 class ToolCall:
     name: str
     arguments: dict[str, Any]
+    # The provider-assigned id from the upstream tool_calls block, threaded
+    # through so the kernel can replay tool_call_id bindings faithfully.
+    id: str | None = None
 
 
 class KernelApi:

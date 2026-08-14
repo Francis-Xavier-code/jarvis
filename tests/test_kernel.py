@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from jarvis.kernel import Kernel
-from jarvis.types import ChatChunk, ChatRequest, ToolCall
+from jarvis.types import ChatChunk, ChatMessage, ChatRequest, ToolCall
 
 
 def _write_plugin(base: Path, name: str, kind: str, py: str) -> Path:
@@ -143,3 +143,61 @@ def test_hot_reload_on_file_change(kernel: Kernel) -> None:
     assert "provider-stub" in reloaded
     # tool table still intact after reload
     assert "demo.ping" in kernel._tools
+
+def test_provider_failure_returns_error_text(kernel: Kernel) -> None:
+    """A failing provider must degrade to error text, not crash the caller."""
+    class _BadProvider:
+        kind = "provider"
+
+        def chat(self, req):
+            raise RuntimeError("boom")
+
+    kernel._provider_svc = _BadProvider()
+    out = kernel.chat("sess-bad", "hi")
+    assert "provider failed" in out
+    assert "boom" in out
+
+
+def test_invoke_tool_uses_snapshot(kernel: Kernel) -> None:
+    """Tool dispatch goes through the round snapshot, never the live table."""
+    out = kernel._invoke_tool(ToolCall(name="demo.ping", arguments={"note": "x"}), {})
+    assert out == "[error] unknown tool: demo.ping"
+    # a snapshot dict entry is dispatched correctly
+    spec = kernel._tools["demo.ping"]
+    out2 = kernel._invoke_tool(
+        ToolCall(name="demo.ping", arguments={"note": "x"}), {"demo.ping": spec}
+    )
+    assert out2 == "pong: x"
+
+
+def test_memory_roundtrip_preserves_tool_calls(kernel: Kernel, tmp_path: Path, monkeypatch) -> None:
+    """The real memory-jsonl plugin keeps tool_calls + reasoning across save/load."""
+    import importlib.util
+    import sys
+
+    plugin_root = Path(__file__).resolve().parents[1] / "plugins" / "memory-jsonl"
+    monkeypatch.setenv("JARVIS_DATA", str(tmp_path / "data"))
+    spec = importlib.util.spec_from_file_location("memory_jsonl_under_test", plugin_root / "plugin.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    m = mod._JsonlMemory()
+
+    msgs = [
+        ChatMessage(role="user", content="hi"),
+        ChatMessage(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {"id": "call_x", "type": "function", "function": {"name": "demo.ping", "arguments": "{}"}}
+            ],
+            reasoning_content="think",
+        ),
+        ChatMessage(role="tool", content="pong", name="demo.ping"),
+    ]
+    m.save("sess-tc", msgs)
+    loaded = m.load("sess-tc")
+    assert loaded[1].tool_calls == msgs[1].tool_calls
+    assert loaded[1].reasoning_content == "think"
+    assert loaded[2].name == "demo.ping"
+
