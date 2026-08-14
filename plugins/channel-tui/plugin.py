@@ -672,6 +672,17 @@ class _JarvisApp(App):
         label = _tool_label(call.name, call.arguments or {})
         self._current_tool_label = label
         self._tool_started = time.time()
+        # Seal the streaming assistant block: flush any partial line, then
+        # reset so continued text opens a NEW widget BELOW this tool row.
+        # Without this, all text accumulates in one top widget and the tool
+        # records all stack below it (no interleaved flow).
+        try:
+            self._flush_md()
+        except Exception:  # noqa: BLE001
+            pass
+        self._assistant_buf = []
+        self._assistant_prefix = False
+        self._current_assistant = None
         self._current_tool = self._new_message(
             f"{_SECONDARY}  {_SPINNER[0]} {label} (0.0s)[/]", "tool-msg"
         )
