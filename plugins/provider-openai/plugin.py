@@ -62,8 +62,8 @@ class OpenAIProvider:
         return self._cfg("openai_api_key", "OPENAI_API_KEY", "")
 
     def _model(self) -> str:
-        # aggregator does not have gpt-4o-mini; fall back to a vendor it has.
-        return self._cfg("model", "MODEL", "kimi-k3")
+        # aggregator does not have gpt-4o-mini; fall back to a cheap, fast model.
+        return self._cfg("model", "MODEL", "deepseek-v4-flash")
 
     # ---- conversion: kernel ChatMessage -> openai message ----
     def _to_openai_messages(self, messages: list[ChatMessage]) -> list[dict]:
@@ -94,6 +94,16 @@ class OpenAIProvider:
                         "role": "assistant",
                         "content": m.content or None,
                         "tool_calls": m.tool_calls,
+                        "reasoning_content": m.reasoning_content or "",
+                    }
+                )
+            elif m.role == "assistant":
+                # plain assistant turn (no tool calls) — still echo reasoning
+                out.append(
+                    {
+                        "role": "assistant",
+                        "content": m.content,
+                        "reasoning_content": m.reasoning_content or "",
                     }
                 )
             else:
@@ -174,10 +184,13 @@ class OpenAIProvider:
         choice = data["choices"][0]
         msg = choice["message"]
         content = msg.get("content") or ""
+        reasoning = msg.get("reasoning_content") or ""
         raw_calls = msg.get("tool_calls") or []
 
         if content:
             yield ChatChunk(text=content)
+        if reasoning:
+            yield ChatChunk(reasoning=reasoning)
 
         for tc in raw_calls:
             fn = tc.get("function", {})

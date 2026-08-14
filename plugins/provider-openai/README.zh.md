@@ -18,7 +18,7 @@ OpenAI 兼容端点 —— 而"模型厂商聚合商"正是一种 OpenAI 兼容�
 |----------------|----------|--------|------|
 | `openai_base_url` | `OPENAI_BASE_URL` | `https://opencode.ai/zen/go/v1` | API 地址 |
 | `openai_api_key` | `OPENAI_API_KEY` | — | API key(**密钥**) |
-| `model` | `MODEL` | `kimi-k3` | 默认请求的模型 |
+| `model` | `MODEL` | `deepseek-v4-flash` | 默认请求的模型 |
 
 > **安全**:绝不要提交 API key。把它放进 `config.toml`(已被 gitignore,见 `.gitignore`
 > 的 `config.toml` 规则),或更好的做法是在 shell / 永不提交的 `.env` 里 `export

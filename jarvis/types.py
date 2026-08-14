@@ -35,6 +35,9 @@ class ChatMessage:
     # can be replayed faithfully (the kernel stores them; providers forward
     # them verbatim). Each item: {"id", "type", "function": {"name","arguments"}}.
     tool_calls: list[dict] | None = None
+    # reasoning_content (deepseek thinking mode) — must be echoed back on
+    # multi-turn so the upstream does not reject the request.
+    reasoning_content: str | None = None
 
 
 @dataclass
@@ -60,6 +63,7 @@ class ChatChunk:
 
     text: str | None = None
     tool_call: "ToolCall | None" = None
+    reasoning: str | None = None  # deepseek-style thinking content
     done: bool = False
 
 

@@ -20,7 +20,7 @@ Read from the `config-core` plugin (`config.toml`) **or** environment variables:
 |-----------------|---------|---------|---------|
 | `openai_base_url` | `OPENAI_BASE_URL` | `https://opencode.ai/zen/go/v1` | the API base |
 | `openai_api_key` | `OPENAI_API_KEY` | — | the API key (**secret**) |
-| `model` | `MODEL` | `kimi-k3` | default model to request |
+| `model` | `MODEL` | `deepseek-v4-flash` | default model to request |
 
 > **Security**: never commit the API key. Put it in `config.toml` (gitignored —
 > see `.gitignore` `config.toml` rule) or, better, export `OPENAI_API_KEY` in your

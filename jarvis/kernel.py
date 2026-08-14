@@ -195,10 +195,13 @@ class Kernel:
         MAX_ROUNDS = 4
         for _ in range(MAX_ROUNDS):
             reply_text = ""
+            reasoning_text = ""
             pending_calls: list[ToolCall] = []
             for chunk in provider.chat(req):
                 if chunk.text:
                     reply_text += chunk.text
+                if chunk.reasoning:
+                    reasoning_text += chunk.reasoning
                 if chunk.tool_call:
                     pending_calls.append(chunk.tool_call)
             if not pending_calls:
@@ -218,6 +221,7 @@ class Kernel:
                     role="assistant",
                     content=reply_text,
                     tool_calls=assistant_tool_calls,
+                    reasoning_content=reasoning_text or None,
                 )
             )
             for call in pending_calls:
@@ -232,8 +236,14 @@ class Kernel:
             )
 
         if memory is not None:
-            memory.append(session, ChatMessage(role="user", content=user_text))
-            memory.append(session, ChatMessage(role="assistant", content=reply_text))
+            _user_msg = ChatMessage(role="user", content=user_text)
+            _asst_msg = ChatMessage(
+                role="assistant",
+                content=reply_text,
+                reasoning_content=reasoning_text or None,
+            )
+            memory.append(session, _user_msg)
+            memory.append(session, _asst_msg)
         return reply_text
 
     def _invoke_tool(self, call: ToolCall) -> str:
